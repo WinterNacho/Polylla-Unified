@@ -9,6 +9,7 @@ data/*/*
 experiments/*.off
 experiments/*/*.off
 experiments/*/*/*.off
+mytests/
 
 !data/datagenerator.sh
 !data/datagenerator_withplotting.sh
@@ -19,5 +20,6 @@ experiments/*/*/*.off
 !data/points50.1.*
 !data/points50_polylla.1.pdf
 
+.vs/
 .vscode
 .vscode/*

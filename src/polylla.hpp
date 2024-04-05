@@ -17,10 +17,14 @@
 #include <iomanip>
 
 #include <triangulation.hpp>
+#include <measure.hpp>
+#include <m_edge_ratio.hpp>
 
 
 #define print_e(eddddge) eddddge<<" ( "<<mesh_input->origin(eddddge)<<" - "<<mesh_input->target(eddddge)<<") "
 
+std::string smooth_method;
+int smooth_iterations = 10;
 
 class Polylla
 {
@@ -121,7 +125,7 @@ public:
          
         auto t_end = std::chrono::high_resolution_clock::now();
         t_label_max_edges = std::chrono::duration<double, std::milli>(t_end-t_start).count();
-        std::cout<<"Labered max edges in "<<t_label_max_edges<<" ms"<<std::endl;
+        std::cout<<"Labeled max edges in "<<t_label_max_edges<<" ms"<<std::endl;
 
         t_start = std::chrono::high_resolution_clock::now();
         //Label frontier edges
@@ -169,6 +173,63 @@ public:
         
         this->m_polygons = output_seeds.size();
 
+        if (smooth_method == "laplacian")
+            optimize_mesh_laplacian(smooth_iterations);
+
+        std::cout << mesh_output->faces() << std::endl;
+        EdgeRatio test(mesh_output, output_seeds);
+        std::cout << test.eval_face(0) << std::endl;
+        test.eval_mesh();
+        std::cout << test.getAverage() << std::endl;
+
+
+
+        // for(std::size_t v = 0; v < mesh_input->vertices(); v++) {
+
+        // }
+        
+//         for(std::size_t v = 0; v < mesh_input->vertices(); v++){
+//             mesh_input->set_PointX(v, mesh_input->get_PointX(v) + (rand() % 500 - 250));
+//             mesh_input->set_PointY(v, mesh_input->get_PointY(v) + (rand() % 500 - 250));
+//             std::cout<<mesh_input->get_PointX(v)<<" "<<mesh_input->get_PointY(v)<<" 0"<<std::endl; 
+// }
+        // std::size_t v = 156;
+        // std::cout << "new_ver" << std::endl;
+        // std::cout << mesh_input->degree(v);
+        // auto v_init = v;
+        // auto e_init = mesh_input->edge_of_vertex(v);
+        // auto e_curr = e_init;
+        // std::cout << "v_init" << v_init << std::endl;
+        // std::cout << "e_init" << e_init << std::endl;
+        // do {
+        //     auto v_curr = mesh_input->target(e_curr);
+        //     std::cout << "origen: " << mesh_input->origin(e_curr) << std::endl;
+        //     std::cout << v_curr << std::endl;
+        //     // std::cout << v_curr << std::endl;
+        //     auto e_twin = mesh_input->twin(e_curr);
+        //     e_curr = mesh_input->next(e_twin);
+        //     std::cout << "v_curr" << v_curr << std::endl;
+        //     std::cout << "e_curr" << e_curr << std::endl;
+        //     // std::cout << mesh_input->origin(e_curr) << std::endl;
+        // } while (e_curr != e_init);
+        // e_init = mesh_output->edge_of_vertex(v);
+        // auto e_next = mesh_output->CCW_edge_to_vertex(e_init);
+        // std::vector<int> seen = {e_init};
+        // std::cout << "v_init" << v_init << std::endl;
+        // std::cout << "e_init" << e_init << std::endl;
+        // while (std::find(seen.begin(), seen.end(), e_next) == seen.end()) {
+        //     seen.push_back(e_next);
+        //     auto v_curr = mesh_output->target(e_next);
+        //     std::cout << "origen: " << mesh_output->origin(e_next) << std::endl;
+        //     std::cout << v_curr << std::endl;
+        //     // std::cout << v_curr << std::endl;
+        //     auto e_twin = mesh_output->twin(e_next);
+        //     e_next = mesh_output->next(e_twin);
+        //     std::cout << "v_curr" << v_curr << std::endl;
+        //     std::cout << "e_curr" << e_next << std::endl;
+            // std::cout << mesh_input->origin(e_curr) << std::endl;
+        // }
+        
         std::cout<<"Mesh with "<<m_polygons<<" polygons "<<n_frontier_edges/2<<" edges and "<<n_barrier_edge_tips<<" barrier-edge tips."<<std::endl;
         //mesh_input->print_pg(std::to_string(mesh_input->vertices()) + ".pg");             
     }
@@ -463,6 +524,10 @@ private:
             //update prev of current frontier-edge
             mesh_output->set_prev(e_curr, e_fe);
 
+            int v_curr = mesh_output->target(e_fe);
+            int e_incident = mesh_output->twin(e_fe);
+            mesh_output->set_incident_halfedge(v_curr, e_incident);
+
             //travel to next half-edge
             e_fe = e_curr;
             e_curr = mesh_input->next(e_curr);
@@ -637,6 +702,37 @@ private:
 
         }while(e_fe != e_init);
         return e_init;
+    }
+
+    void optimize_mesh_laplacian(int iterations)
+    {
+        for (int i = 0; i<iterations; i++) {
+            std::cout << "opt " << i << std::endl;
+            for(std::size_t v = 0; v < mesh_input->vertices(); v++){
+                if (mesh_output->is_border_vertex(v)) {
+                    continue;
+                }
+                auto v_init = v;
+                auto e_init = mesh_output->edge_of_vertex(v);
+                auto e_next = e_init;
+                int n = 0;
+                double x = 0;
+                double y = 0;
+                std::vector<int> seen = {};
+                while (std::find(seen.begin(), seen.end(), e_next) == seen.end()) {
+                    seen.push_back(e_next);
+                    auto v_next = mesh_output->target(e_next);
+                    x += mesh_input->get_PointX(v_next) - mesh_input->get_PointX(v);
+                    y += mesh_input->get_PointY(v_next) - mesh_input->get_PointY(v);
+                    n++;
+                    e_next = mesh_output->CCW_edge_to_vertex(e_next);
+                }
+                // std::cout << mesh_input->get_PointX(v) << ", " << x/n << std::endl;
+                // std::cout << mesh_input->get_PointY(v) << ", " << y/n << std::endl;
+                mesh_input->set_PointX(v, mesh_input->get_PointX(v) + x/n);
+                mesh_input->set_PointY(v, mesh_input->get_PointY(v) + y/n);
+            }
+        }
     }
     
 };

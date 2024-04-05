@@ -637,6 +637,18 @@ int CW_edge_to_vertex(int e)
         return Vertices.at(i).y;
     }
 
+    int get_size(){
+        return Vertices.size();
+    }
+
+    void set_PointX(int i, double new_x){
+        Vertices.at(i).x = new_x;
+    }
+
+    void set_PointY(int i, double new_y){
+        Vertices.at(i).y = new_y;
+    }
+
     //Calculates the next edge of the face incident to edge e
     //Input: e is the edge
     //Output: the next edge of the face incident to e
@@ -717,6 +729,11 @@ int CW_edge_to_vertex(int e)
     void set_prev(int e, int prv)
     {
         HalfEdges.at(e).prev = prv;
+    }
+
+    void set_incident_halfedge(int v, int e)
+    {
+        Vertices.at(v).incident_halfedge = e;
     }
 
     //void set_face(int e, int f)

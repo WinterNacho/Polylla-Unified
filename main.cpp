@@ -7,10 +7,47 @@
 #include <polylla.hpp>
 #include <triangulation.hpp>
 
+bool is_positive_num(std::string s) {
+    for (auto c : s) {
+        if (!isdigit(c)) return false;
+    }
+    return true;
+}
+
 
 int main(int argc, char **argv) {
+    int opt_args = 0;
 
-    if(argc == 5)
+    int arg_index = std::find_if(argv + 1, argv + argc, [&](char const * const arg) { return strcmp(arg, "--smooth") == 0; }) - argv;
+    std::vector<std::string> smooth_methods = {"laplacian"};
+    if (arg_index < argc) {
+        std::string arg_value = std::string(argv[arg_index + 1]);
+        if (std::find(smooth_methods.begin(), smooth_methods.end(), arg_value) != smooth_methods.end()) {
+            opt_args += 2;
+            smooth_method = arg_value;
+        } else {
+            std::cout<< "Invalid value " << arg_value << " for optional argument --smooth"<<std::endl;
+            std::cout<< "Valid values:" <<std::endl;
+            for (auto s : smooth_methods) {
+                std::cout << s << std::endl;
+            }
+            return 0;
+        }
+    }
+
+    arg_index = std::find_if(argv + 1, argv + argc, [&](char const * const arg) { return strcmp(arg, "--smooth-iter") == 0; }) - argv;
+    if (arg_index < argc) {
+        std::string arg_value = std::string(argv[arg_index + 1]);
+        if (is_positive_num(arg_value)) {
+            opt_args += 2;
+            smooth_iterations = stoi(arg_value);
+        } else {
+            std::cout<< "Invalid value " << arg_value << " for optional argument --smooth-iter, value should be a positive number"<<std::endl;
+            return 0;
+        }
+    }
+
+    if(argc == opt_args + 5)
     {
         std::string node_file = std::string(argv[1]);
         std::string ele_file = std::string(argv[2]);
@@ -38,7 +75,7 @@ int main(int argc, char **argv) {
         //std::cout<<"output off in "<<output<<".off"<<std::endl;
         //mesh.print_ALE(output+".ale");
         //std::cout<<"output ale in "<<output<<".ale"<<std::endl;
-    }else if (argc == 3){
+    }else if (argc == opt_args + 3){
         std::string off_file = std::string(argv[1]);
         std::string output = std::string(argv[2]);
 	    Polylla mesh(off_file);
@@ -49,7 +86,7 @@ int main(int argc, char **argv) {
         std::cout<<"output off in "<<output<<".off"<<std::endl;
         //mesh.print_ALE(output+".ale");
         //std::cout<<"output ale in "<<output<<".ale"<<std::endl;
-    }else if (argc == 2){
+    }else if (argc == opt_args + 2){
         int size = atoi(argv[1]);
         std::string output = "uniform_" + std::string(argv[1]) + "_CPU";
 
