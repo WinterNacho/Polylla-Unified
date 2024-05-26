@@ -301,9 +301,8 @@ def kernel_poly(poly, vertices):
     print("Poly:", [vertices[i] for i in poly])
     print("IDS:", [i for i in poly])
     n = len(poly)
-    m = len(vertices)
     if start_id == n: # convex
-        return None
+        return [vertices[i] for i in poly]
     v_F = inf_coord(vertices[poly[start_id]], vertices[poly[(start_id + 1)%n]])
     v_L = inf_coord(vertices[poly[(start_id - 1)%n]], vertices[poly[start_id]], True)
     k_vertices = [v_F, vertices[poly[start_id]], v_L]
@@ -333,7 +332,7 @@ def kernel_poly(poly, vertices):
             print("Continued")
             continue
         elif angle > 180: # reflex angle
-            left = is_left(v1, v2, k_vertices[F_id])
+            left = is_left(v1, v2, k_vertices[F_id%len(k_vertices)])
             if left < 0 or isclose(0, left, abs_tol=tol): # F to the right or on edge
                 # scan K ccw from F
                 F_curr_t = F_id + 1
@@ -341,45 +340,39 @@ def kernel_poly(poly, vertices):
                 w_t_id = None
                 while F_curr_t != L_id + 1:
                     w_t_id = F_curr_t
-                    w_t1 = k_vertices[w_t_id - 1]
-                    w_t2 = k_vertices[w_t_id]
-                    print("looping", w_t_id, w_t1, w_t2)
+                    w_t1 = k_vertices[(w_t_id - 1)%len(k_vertices)]
+                    w_t2 = k_vertices[w_t_id%len(k_vertices)]
                     w_p = inf_intersection(v1, v2, w_t1, w_t2)
-                    print("Prime", w_p)
                     if w_p is not None and is_on(v1, v2, w_p, inf_v1=True) and is_on(w_t1, w_t2, w_p):
                         break
                     F_curr_t += 1
                 if w_p is None: # kernel is empty
                     print("EMPTY 1")
-                    return None
+                    return []
                 # scan K cw from F
                 F_curr_s = F_id
                 w_p2 = None
                 w_s_id = None
                 limit = 0 if not bounded else F_id + 1
                 while w_s_id != limit:
-                    w_s_id = F_curr_s % len(k_vertices)
-                    w_s1 = k_vertices[w_s_id - 1]
-                    w_s2 = k_vertices[w_s_id]
+                    w_s_id = F_curr_s
+                    w_s1 = k_vertices[(w_s_id - 1)%len(k_vertices)]
+                    w_s2 = k_vertices[w_s_id%len(k_vertices)]
                     w_p2 = inf_intersection(v1, v2, w_s1, w_s2)
                     if w_p2 is not None and is_on(v1, v2, w_p2, inf_v1=True) and is_on(w_s1, w_s2, w_p2):
                         break
                     F_curr_s = (F_curr_s - 1)%len(k_vertices)
                 if w_p2 is not None:
-                    print(w_s_id, w_t_id)
                     k_vertices_new = k_vertices[:w_s_id] + [w_p2, w_p] + k_vertices[w_t_id:]
                 else:
-                    head = k_vertices[0]
-                    tail = k_vertices[-1]
-                    pre_tail = k_vertices[-2]
                     inter = inf_intersection(v1, v2, k_vertices[1], k_vertices[0])
                     # if is_left(v2, inf_v1, head) > 0 and is_left(pre_tail, tail, inf_v1) > 0: # slope between head and tail
                     if inter is not None and is_on(v1, v2, inter, inf_v2=True) and is_on(k_vertices[1], k_vertices[0], inter, inf_v2=True):
                         print("Enter here 2")
                         w_r_id = len(k_vertices) - 1
                         while w_p2 is None:
-                            w_r1 = k_vertices[w_r_id - 1]
-                            w_r2 = k_vertices[w_r_id]
+                            w_r1 = k_vertices[(w_r_id - 1)%len(k_vertices)]
+                            w_r2 = k_vertices[w_r_id%len(k_vertices)]
                             w_p2 = inf_intersection(v1, v2, w_r1, w_r2)
                             if w_p2 is not None and is_on(v1, v2, w_p2, inf_v1=True) and is_on(w_r1, w_r2, w_p2):
                                 break
@@ -405,7 +398,8 @@ def kernel_poly(poly, vertices):
                     w_t2 = k_vertices[(w_t_id + 1)%len(k_vertices)]
                     inf_w = inf_coord(v2, w_t1, True)
                     if is_left(v2, inf_w, w_t2) < 0:
-                        F_id = w_t_id
+                        # F_id = w_t_id
+                        F_id = k_vertices_new.index(k_vertices[w_t_id%len(k_vertices)])
                         break
                     F_curr_t += 1
             
@@ -413,18 +407,20 @@ def kernel_poly(poly, vertices):
             L_curr_u = L_id - 1
             limit = len(k_vertices) - 1 if not bounded else L_id - 2
             while L_curr_u != limit:
-                w_u1 = k_vertices[L_curr_u]
+                print("Should be here")
+                w_u1 = k_vertices[L_curr_u%len(k_vertices)]
                 w_u2 = k_vertices[(L_curr_u + 1)%len(k_vertices)]
                 inf_w = inf_coord(v2, w_u1, True)
                 if is_left(v2, inf_w, w_u2) > 0:
-                    L_id = L_curr_u
+                    L_id = k_vertices_new.index(k_vertices[L_curr_u%len(k_vertices)])
+                    print("Breaking", L_id)
                     break
                 L_curr_u = (L_curr_u + 1) % len(k_vertices)
             if L_curr_u == limit:
-                L_id = k_vertices_new.index(k_vertices[L_id])
+                L_id = k_vertices_new.index(k_vertices[L_id%len(k_vertices)])
             k_vertices = k_vertices_new
         else: # convex angle
-            left = is_left(v1, v2, k_vertices[L_id])
+            left = is_left(v1, v2, k_vertices[L_id%len(k_vertices)])
             # print(v1, v2, k_vertices[L_id])
             if left < 0 or isclose(0, left, abs_tol=tol): # L to the right or on edge
                 # scan K cw from L
@@ -433,15 +429,15 @@ def kernel_poly(poly, vertices):
                 w_t_id = None
                 while L_curr_t != F_id:
                     w_t_id = L_curr_t
-                    w_t1 = k_vertices[w_t_id - 1]
-                    w_t2 = k_vertices[w_t_id]
+                    w_t1 = k_vertices[(w_t_id - 1)%len(k_vertices)]
+                    w_t2 = k_vertices[w_t_id%len(k_vertices)]
                     w_p = inf_intersection(v1, inf_v2, w_t1, w_t2)
                     if w_p is not None and is_on(v1, v2, w_p, inf_v2=True) and is_on(w_t1, w_t2, w_p):
                         break
                     L_curr_t -= 1
                 if w_p is None: # kernel is empty
                     print("EMPTY 2")
-                    return None
+                    return []
                 
                 L_curr_s = L_id + 1
                 w_p2 = None
@@ -464,24 +460,17 @@ def kernel_poly(poly, vertices):
                     inter = inf_intersection(v1, v2, k_vertices[1], k_vertices[0])
                     # if is_left(v1, inf_v2, head) > 0 and is_left(pre_tail, tail, inf_v2) > 0: # slope between head and tail
                     if inter is not None and is_on(v1, v2, inter, inf_v2=True) and is_on(k_vertices[1], k_vertices[0], inter, inf_v2=True):
-                        print("should be here")
                         w_r_id = 1
                         while w_p2 is None:
-                            w_r1 = k_vertices[w_r_id - 1]
-                            w_r2 = k_vertices[w_r_id]
+                            w_r1 = k_vertices[(w_r_id - 1)%len(k_vertices)]
+                            w_r2 = k_vertices[w_r_id%len(k_vertices)]
                             w_p2 = inf_intersection(v1, v2, w_r1, w_r2)
                             if w_p2 is not None and is_on(v1, v2, w_p2, inf_v2=True):
                                 break
                             w_r_id = (w_r_id - 1)%len(k_vertices)
-                        print("r:", w_r_id)
                         k_vertices_new = k_vertices[w_r_id:w_t_id] + [w_p, w_p2]
                         bounded = True
                     else: # slope between head and tail
-                        print("not here")
-                        print(is_left(v1, inf_v2, head))
-                        print(is_left(pre_tail, tail, inf_v2))
-                        print((inf_v2[1] - v1[1])/(inf_v2[0] - v1[0]))
-                        print((head[1] - k_vertices[1][1])/(head[0] - k_vertices[1][0]))
                         k_vertices_new = k_vertices[:w_t_id] + [w_p, inf_v2]
                 # set new F and L
                 if w_p2 is not None: # 2 1 1
@@ -493,11 +482,9 @@ def kernel_poly(poly, vertices):
                             w_t1 = k_vertices[w_t_id%len(k_vertices)]
                             w_t2 = k_vertices[(w_t_id + 1)%len(k_vertices)]
                             inf_w = inf_coord(v2, w_t1, True)
-                            if w_t_id == 1:
-                                while True:
-                                    continue
                             if is_left(v2, inf_w, w_t2) < 0:
-                                F_id = w_t_id
+                                # F_id = w_t_id
+                                F_id = k_vertices_new.index(k_vertices[w_t_id%len(k_vertices)])
                                 break
                             F_curr_t += 1
                     else:
@@ -511,11 +498,12 @@ def kernel_poly(poly, vertices):
                         L_curr_u = start - 1
                         limit = len(k_vertices) - 1 if not bounded else start - 2
                         while L_curr_u != limit:
-                            w_u1 = k_vertices[L_curr_u]
-                            w_u2 = k_vertices[L_curr_u + 1]
+                            w_u1 = k_vertices[L_curr_u%len(k_vertices)]
+                            w_u2 = k_vertices[(L_curr_u + 1)%len(k_vertices)]
                             inf_w = inf_coord(v2, w_u1, True)
                             if is_left(v2, inf_w, w_u2) > 0:
-                                L_id = L_curr_u
+                                # L_id = L_curr_u
+                                L_id = k_vertices_new.index(k_vertices[L_curr_u%len(k_vertices)])
                                 break
                             L_curr_u = (L_curr_u + 1) % len(k_vertices)
                 else: # 2 1 2
@@ -528,7 +516,8 @@ def kernel_poly(poly, vertices):
                             w_t2 = k_vertices[(w_t_id + 1)%len(k_vertices)]
                             inf_w = inf_coord(v2, w_t1, True)
                             if is_left(v2, inf_w, w_t2) < 0:
-                                F_id = w_t_id
+                                # F_id = w_t_id
+                                F_id = k_vertices_new.index(k_vertices[w_t_id%len(k_vertices)])
                                 break
                             F_curr_t += 1
                     else:
@@ -546,7 +535,8 @@ def kernel_poly(poly, vertices):
                     w_t2 = k_vertices[(w_t_id + 1)%len(k_vertices)]
                     inf_w = inf_coord(v2, w_t1, True)
                     if is_left(v2, inf_w, w_t2) < 0:
-                        F_id = w_t_id
+                        # F_id = w_t_id
+                        F_id = k_vertices_new.index(k_vertices[w_t_id%len(k_vertices)])
                         break
                     F_curr_t += 1
                 # new L
@@ -554,11 +544,12 @@ def kernel_poly(poly, vertices):
                     L_curr_u = L_id - 1
                     limit = len(k_vertices) - 1 if not bounded else L_id - 2
                     while L_curr_u != limit:
-                        w_u1 = k_vertices[L_curr_u]
-                        w_u2 = k_vertices[L_curr_u + 1]
+                        w_u1 = k_vertices[L_curr_u%len(k_vertices)]
+                        w_u2 = k_vertices[(L_curr_u + 1)%len(k_vertices)]
                         inf_w = inf_coord(v2, w_u1, True)
                         if is_left(v2, inf_w, w_u2) > 0:
-                            L_id = L_curr_u
+                            # L_id = L_curr_u
+                            L_id = k_vertices_new.index(k_vertices[L_curr_u%len(k_vertices)])
                             break
                         L_curr_u = (L_curr_u + 1) % len(k_vertices)
 
@@ -573,11 +564,13 @@ def kernel_mesh(regions, vertices):
     v_count = 0
     faces = 0
     for poly in regions:
+        color = "255 0 0"
         print("NEW REGION")
         kernel_vertices = kernel_poly(poly, vertices)
-        if kernel_vertices is None:
+        original_poly = [vertices[i] for i in poly]
+        if kernel_vertices == original_poly:
             print("None")
-            continue
+            color = "255 255 0"
         print("Kernel:", kernel_vertices)
         v_count += len(kernel_vertices)
         faces += 1
@@ -586,7 +579,7 @@ def kernel_mesh(regions, vertices):
             vert = kernel_vertices[j]
             v += "{} {} 0.0\n".format(vert[0], vert[1])
             index += " " + str(offset + j)
-        index += " 255 0 0\n"
+        index += " " + color + "\n"
         offset += len(kernel_vertices)
     output += "{} {} 0\n".format(v_count, faces)
     output += v
