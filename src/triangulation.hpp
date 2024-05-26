@@ -46,6 +46,8 @@ TODO:
 #include <map>
 #include <chrono>
 
+// #include <measure.hpp>
+
 struct vertex{
     double x;
     double y;
@@ -757,6 +759,21 @@ int degree(int v)
 int incident_halfedge(int f)
 {
     return 3*f;
+}
+
+static double aspect_ratio(Triangulation *mesh, int f) {
+    int e_curr = f;
+    double max_edge = -1;
+    double min_edge = -1;
+    do {
+        double e_length = mesh->distance(e_curr);
+        if (max_edge < 0) max_edge = e_length;
+        if (min_edge < 0) min_edge = e_length;
+        max_edge = std::max(max_edge, e_length);
+        min_edge = std::min(min_edge, e_length);
+        e_curr = mesh->next(e_curr);
+    } while (e_curr != f);
+    return min_edge / max_edge;
 }
 };
 

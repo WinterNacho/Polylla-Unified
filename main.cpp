@@ -19,7 +19,7 @@ int main(int argc, char **argv) {
     int opt_args = 0;
 
     int arg_index = std::find_if(argv + 1, argv + argc, [&](char const * const arg) { return strcmp(arg, "--smooth") == 0; }) - argv;
-    std::vector<std::string> smooth_methods = {"laplacian"};
+    std::vector<std::string> smooth_methods = {"laplacian", "laplacian-aspect-ratio"};
     if (arg_index < argc) {
         std::string arg_value = std::string(argv[arg_index + 1]);
         if (std::find(smooth_methods.begin(), smooth_methods.end(), arg_value) != smooth_methods.end()) {
@@ -71,8 +71,8 @@ int main(int argc, char **argv) {
         
         mesh.print_stats(output + ".json");
         std::cout<<"output json in "<<output<<".json"<<std::endl;
-        //mesh.print_OFF(output+".off");
-        //std::cout<<"output off in "<<output<<".off"<<std::endl;
+        mesh.print_OFF(output+".off");
+        std::cout<<"output off in "<<output<<".off"<<std::endl;
         //mesh.print_ALE(output+".ale");
         //std::cout<<"output ale in "<<output<<".ale"<<std::endl;
     }else if (argc == opt_args + 3){

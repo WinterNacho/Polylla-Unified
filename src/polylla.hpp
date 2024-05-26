@@ -17,13 +17,11 @@
 #include <iomanip>
 
 #include <triangulation.hpp>
-#include <measure.hpp>
-#include <m_edge_ratio.hpp>
-
 
 #define print_e(eddddge) eddddge<<" ( "<<mesh_input->origin(eddddge)<<" - "<<mesh_input->target(eddddge)<<") "
 
 std::string smooth_method;
+std::string constrained_smooth_method;
 int smooth_iterations = 10;
 
 class Polylla
@@ -173,16 +171,14 @@ public:
         
         this->m_polygons = output_seeds.size();
 
-        if (smooth_method == "laplacian")
+        if (smooth_method == "laplacian") {
+            std::cout << "laplacian" << std::endl;
             optimize_mesh_laplacian(smooth_iterations);
-
-        std::cout << mesh_output->faces() << std::endl;
-        EdgeRatio test(mesh_output, output_seeds);
-        std::cout << test.eval_face(0) << std::endl;
-        test.eval_mesh();
-        std::cout << test.getAverage() << std::endl;
-
-
+        }
+        else if (smooth_method == "laplacian-aspect-ratio") {
+            std::cout << "laplacian constrained" << std::endl;
+            optimize_mesh_laplacian_constrained(smooth_iterations, Triangulation::aspect_ratio);
+        }
 
         // for(std::size_t v = 0; v < mesh_input->vertices(); v++) {
 
@@ -367,18 +363,20 @@ public:
 
     //Print off file of the polylla mesh
     void print_OFF(std::string filename){
+        std::cout << "printing off" << std::endl;
         std::ofstream out(filename);
 
       //  out<<"{ appearance  {+edge +face linewidth 2} LIST\n";
         out<<"OFF"<<std::endl;
         //num_vertices num_polygons 0
-        out<<std::setprecision(15)<<mesh_input->vertices()<<" "<<m_polygons<<" 0"<<std::endl;
+        out<<std::setprecision(15)<<mesh_output->vertices()<<" "<<m_polygons<<" 0"<<std::endl;
         //print nodes
-        for(std::size_t v = 0; v < mesh_input->vertices(); v++)
-            out<<mesh_input->get_PointX(v)<<" "<<mesh_input->get_PointY(v)<<" 0"<<std::endl; 
+        for(std::size_t v = 0; v < mesh_output->vertices(); v++)
+            out<<mesh_output->get_PointX(v)<<" "<<mesh_output->get_PointY(v)<<" 0"<<std::endl; 
         //print polygons
         int size_poly;
         int e_curr;
+        int c = 1;
         for(auto &e_init : output_seeds){
             size_poly = 1;
             e_curr = mesh_output->next(e_init);
@@ -704,37 +702,87 @@ private:
         return e_init;
     }
 
-    void optimize_mesh_laplacian(int iterations)
-    {
+    void optimize_mesh_laplacian(int iterations) {
         for (int i = 0; i<iterations; i++) {
-            std::cout << "opt " << i << std::endl;
-            for(std::size_t v = 0; v < mesh_input->vertices(); v++){
+            for(std::size_t v = 0; v < mesh_output->vertices(); v++){
                 if (mesh_output->is_border_vertex(v)) {
                     continue;
                 }
-                auto v_init = v;
                 auto e_init = mesh_output->edge_of_vertex(v);
                 auto e_next = e_init;
                 int n = 0;
                 double x = 0;
                 double y = 0;
-                std::vector<int> seen = {};
-                while (std::find(seen.begin(), seen.end(), e_next) == seen.end()) {
-                    seen.push_back(e_next);
+                do {
                     auto v_next = mesh_output->target(e_next);
-                    x += mesh_input->get_PointX(v_next) - mesh_input->get_PointX(v);
-                    y += mesh_input->get_PointY(v_next) - mesh_input->get_PointY(v);
+                    x += mesh_output->get_PointX(v_next) - mesh_output->get_PointX(v);
+                    y += mesh_output->get_PointY(v_next) - mesh_output->get_PointY(v);
                     n++;
                     e_next = mesh_output->CCW_edge_to_vertex(e_next);
-                }
-                // std::cout << mesh_input->get_PointX(v) << ", " << x/n << std::endl;
-                // std::cout << mesh_input->get_PointY(v) << ", " << y/n << std::endl;
-                mesh_input->set_PointX(v, mesh_input->get_PointX(v) + x/n);
-                mesh_input->set_PointY(v, mesh_input->get_PointY(v) + y/n);
+                } while (e_next != e_init);
+                mesh_output->set_PointX(v, mesh_output->get_PointX(v) + x/n);
+                mesh_output->set_PointY(v, mesh_output->get_PointY(v) + y/n);
             }
         }
     }
-    
+
+    void optimize_mesh_laplacian_constrained(int iterations, double (*measure)(Triangulation*, int)) {
+        for (int i = 0; i<iterations; i++) {
+            for(std::size_t v = 0; v < mesh_output->vertices(); v++){
+                if (mesh_output->is_border_vertex(v)) {
+                    continue;
+                }
+                auto e_init = mesh_output->edge_of_vertex(v);
+                auto e_next = e_init;
+                int n = 0;
+                double x = 0;
+                double y = 0;
+                do {
+                    auto v_next = mesh_output->target(e_next);
+                    x += mesh_output->get_PointX(v_next) - mesh_output->get_PointX(v);
+                    y += mesh_output->get_PointY(v_next) - mesh_output->get_PointY(v);
+                    n++;
+                    e_next = mesh_output->CCW_edge_to_vertex(e_next);
+                } while (e_next != e_init);
+
+                // original measures
+                double original_x = mesh_output->get_PointX(v);
+                double original_y = mesh_output->get_PointY(v);
+                double original_sum = 0;
+                int adjacent_faces = 0;
+                e_init = mesh_output->edge_of_vertex(v);
+                e_next = e_init;
+                do {
+                    double face_res = measure(mesh_output, e_next);
+                    adjacent_faces++;
+                    original_sum += face_res;
+                    e_next = mesh_output->CCW_edge_to_vertex(e_next);
+                } while (e_next != e_init);
+                double original_avg = original_sum / adjacent_faces;
+
+                // move vertex
+                mesh_output->set_PointX(v, mesh_output->get_PointX(v) + x/n);
+                mesh_output->set_PointY(v, mesh_output->get_PointY(v) + y/n);
+
+                // new measures
+                double new_sum = 0;
+                e_next = e_init;
+                do {
+                    double face_res = measure(mesh_output, e_next);
+                    new_sum += face_res;
+                    e_next = mesh_output->CCW_edge_to_vertex(e_next);
+                } while (e_next != e_init);
+                double new_avg = new_sum / adjacent_faces;
+
+                // if worse measure undo move
+                if (new_avg < original_avg) {
+                    std::cout << v << " returning" <<std::endl;
+                    mesh_output->set_PointX(v, original_x);
+                    mesh_output->set_PointY(v, original_y);
+                }
+            }
+        }
+    }
 };
 
 #endif
