@@ -19,7 +19,7 @@ int main(int argc, char **argv) {
     int opt_args = 0;
 
     int arg_index = std::find_if(argv + 1, argv + argc, [&](char const * const arg) { return strcmp(arg, "--smooth") == 0; }) - argv;
-    std::vector<std::string> smooth_methods = {"laplacian", "laplacian-aspect-ratio"};
+    std::vector<std::string> smooth_methods = {"laplacian", "laplacian-edge-ratio", "distmesh"};
     if (arg_index < argc) {
         std::string arg_value = std::string(argv[arg_index + 1]);
         if (std::find(smooth_methods.begin(), smooth_methods.end(), arg_value) != smooth_methods.end()) {
@@ -40,9 +40,21 @@ int main(int argc, char **argv) {
         std::string arg_value = std::string(argv[arg_index + 1]);
         if (is_positive_num(arg_value)) {
             opt_args += 2;
-            smooth_iterations = stoi(arg_value);
+            max_smooth_iterations = stoi(arg_value);
         } else {
             std::cout<< "Invalid value " << arg_value << " for optional argument --smooth-iter, value should be a positive number"<<std::endl;
+            return 0;
+        }
+    }
+
+    arg_index = std::find_if(argv + 1, argv + argc, [&](char const * const arg) { return strcmp(arg, "--target-length") == 0; }) - argv;
+    if (arg_index < argc) {
+        std::string arg_value = std::string(argv[arg_index + 1]);
+        if (is_positive_num(arg_value) || stoi(arg_value) == 0) {
+            opt_args += 2;
+            distmesh_target_length = stoi(arg_value);
+        } else {
+            std::cout<< "Invalid value " << arg_value << " for optional argument --target-length, value should be a positive number"<<std::endl;
             return 0;
         }
     }

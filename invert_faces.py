@@ -12,6 +12,8 @@ if __name__ == "__main__":
                 if line.startswith("#"):
                     continue
                 l = line.split()
+                if len(l) == 0:
+                    continue
                 if l[0] == "OFF":
                     fo.write("OFF\n")
                     break
@@ -21,21 +23,33 @@ if __name__ == "__main__":
                 if line.startswith('#'):
                     continue
                 l = line.split()
+                if len(l) == 0:
+                    continue
                 if l[0].isdigit():
                     n_vertices = int(l[0])
                     n_regions = int(l[1])
                     fo.write("{} {} 0\n".format(n_vertices, n_regions))
                     break
-            for i in range(0, n_vertices):
+            i = 0
+            while i < n_vertices:
                 line = fi.readline()
+                if len(line.split()) == 0:
+                    continue
                 fo.write(line)
-            for i in range(0, n_regions):
+                i += 1
+            i = 0
+            while i < n_regions:
                 line = fi.readline()
+                if len(line.split()) == 0:
+                    continue
                 l = line.split()
                 fo.write(str(l.pop(0)) + " ")
                 values = [l[j] for j in range(len(l) - 1, -1, -1)]
                 fo.write(" ".join(values))
                 fo.write("\n")
+                i += 1
+    print("Written inverted mesh to", output)
+
 
 
 
