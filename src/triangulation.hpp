@@ -95,7 +95,8 @@ private:
     std::vector<vertex> Vertices;
     std::vector<halfEdge> HalfEdges; //list of edges
     //std::vector<char> triangle_flags; //list of edges that generate a unique triangles, 
-    std::vector<int> triangle_list; //list of edges that generate a unique triangles, 
+    std::vector<int> triangle_list; //list of edges that generate a unique triangles,
+    std::vector<int> triangle_regions; //list of the region of each triangle
     
 
 
@@ -132,26 +133,40 @@ private:
         std::vector<int> faces;
         std::string line;
         std::ifstream elefile(name);
-        int a1, a2, a3, a4;
-        
         //std::cout<<"Node file"<<std::endl;
-        if (elefile.is_open())
-        {
-            elefile >> n_faces;
-            //std::cout<<pnumber<<std::endl;
+        
+        if (elefile.is_open()) {
+            int nodes_per_triangle, hasRegion;
+            elefile >> n_faces >> nodes_per_triangle >> hasRegion; // Asumming the atribute is region always
             faces.reserve(3*n_faces);
+            if (hasRegion > 0) {
+                triangle_regions.reserve(n_faces);
+            }
+            
             std::getline(elefile, line); //skip the first line
             while (std::getline(elefile, line))
             {
-                std::istringstream(line) >> a1 >> a2 >> a3 >> a4;
-                faces.push_back(a2);
-                faces.push_back(a3);
-                faces.push_back(a4);
-                //std::cout<<"Vertex "<<a1<<" "<<v.x<<" "<<v.y<<" "<<v.is_border<<std::endl;
+                if (line[0] != '#')
+                {
+                    std::istringstream iss(line);
+                    int triangle_id, v1, v2, v3;
+                    iss >> triangle_id >> v1 >> v2 >> v3;
+                    
+                    faces.push_back(v1);
+                    faces.push_back(v2);
+                    faces.push_back(v3);
+                    
+                    if (hasRegion > 0)
+                    {
+                        int region;
+                        iss >> region;
+                        triangle_regions.push_back(region);
+                    }
+                }
             }
         }
         else 
-            std::cout << "Unable to open node file"; 
+            std::cout << "Unable to open ele file"; 
         elefile.close();
 
         return faces;
@@ -461,7 +476,8 @@ public:
         this->n_halfedges = t.n_halfedges;
         this->Vertices = t.Vertices;
         this->HalfEdges = t.HalfEdges;
-        this-> t_triangulation_generation = t.t_triangulation_generation;
+        this->triangle_regions = t.triangle_regions;
+        this->t_triangulation_generation = t.t_triangulation_generation;
     }
 
     Triangulation(int size){
