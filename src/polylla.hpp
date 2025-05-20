@@ -305,37 +305,44 @@ public:
     }
 
     //Print off file of the polylla mesh
-    void print_OFF(std::string filename){
+    void print_OFF(std::string filename) {
         std::ofstream out(filename);
 
-      //  out<<"{ appearance  {+edge +face linewidth 2} LIST\n";
-        out<<"OFF"<<std::endl;
-        //num_vertices num_polygons 0
-        out<<std::setprecision(15)<<mesh_input->vertices()<<" "<<m_polygons<<" 0"<<std::endl;
-        //print nodes
-        for(std::size_t v = 0; v < mesh_input->vertices(); v++)
-            out<<mesh_input->get_PointX(v)<<" "<<mesh_input->get_PointY(v)<<" 0"<<std::endl; 
-        //print polygons
-        int size_poly;
-        int e_curr;
-        for(auto &e_init : output_seeds){
-            size_poly = 1;
-            e_curr = mesh_output->next(e_init);
-            while(e_init != e_curr){
-                size_poly++;
-                e_curr = mesh_output->next(e_curr);
-            }
-            out<<size_poly<<" ";            
+        out << "OFF" << std::endl;
+        out << std::setprecision(15) << mesh_input->vertices() << " " << m_polygons << " " << n_frontier_edges / 2 << std::endl;
 
-            out<<mesh_output->origin(e_init)<<" ";
-            e_curr = mesh_output->next(e_init);
-            while(e_init != e_curr){
-                out<<mesh_output->origin(e_curr)<<" ";
-                e_curr = mesh_output->next(e_curr);
-            }
-            out<<std::endl; 
+        // Print vertices
+        for (int i = 0; i < mesh_input->vertices(); i++) {
+            out << mesh_input->get_PointX(i) << " " << mesh_input->get_PointY(i) << " 0" << std::endl;
         }
-      //  out<<"}"<<std::endl;
+
+        // Print polygons with region-based color
+        for (int i = 0; i < m_polygons; i++) {
+            int e_init = output_seeds[i];
+            int e_curr = e_init;
+            std::vector<int> polygon_vertices;
+
+            // Collect vertex indices of the polygon
+            do {
+                polygon_vertices.push_back(mesh_output->origin(e_curr));
+                e_curr = mesh_output->next(e_curr);
+            } while (e_curr != e_init);
+
+            // Get region from the original mesh (via first halfedge)
+            int region = mesh_input->region_face(mesh_input->index_face(e_init));
+
+            // Generate different RGB colors using prime numbers based on the region to obtain different colors for each region
+            float r = (region * 73 % 256) / 255.0f;
+            float g = (region * 149 % 256) / 255.0f;
+            float b = (region * 233 % 256) / 255.0f;
+
+            // Write polygon with RGBA color
+            out << polygon_vertices.size();
+            for (int v : polygon_vertices)
+                out << " " << v;
+            out << " " << r << " " << g << " " << b << " 1.0" << std::endl;
+        }
+
         out.close();
     }
 
@@ -346,10 +353,16 @@ private:
     bool is_seed_edge(int e){
         int twin = mesh_input->twin(e);
 
-        bool is_terminal_edge = (mesh_input->is_interior_face(twin) &&  (max_edges[e] && max_edges[twin]) );
+        bool is_terminal_edge = (mesh_input->is_interior_face(twin) && (max_edges[e] && max_edges[twin]));
         bool is_terminal_border_edge = (mesh_input->is_border_face(twin) && max_edges[e]);
+        
+        bool is_region_boundary = false;
+        int region1 = mesh_input->region_face(mesh_input->index_face(e));
+        int region2 = mesh_input->region_face(mesh_input->index_face(twin));
+        is_region_boundary = (region1 != region2);
+        bool is_terminal_region_edge = (is_region_boundary && max_edges[e]);
 
-        if( (is_terminal_edge && e < twin ) || is_terminal_border_edge){
+        if((is_terminal_edge && e < twin) || is_terminal_border_edge || is_terminal_region_edge){
             return true;
         }
 
@@ -415,10 +428,14 @@ private:
         int twin = mesh_input->twin(e);
         bool is_border_edge = mesh_input->is_border_face(e) || mesh_input->is_border_face(twin);
         bool is_not_max_edge = !(max_edges[e] || max_edges[twin]);
-        if(is_border_edge || is_not_max_edge)
-            return true;
-        else
-            return false;
+
+        bool is_region_boundary = false;
+        int region1 = mesh_input->region_face(mesh_input->index_face(e));
+        int region2 = mesh_input->region_face(mesh_input->index_face(twin));
+        is_region_boundary = (region1 != region2);
+        
+        return is_border_edge || is_not_max_edge || is_region_boundary;
+
     }
 
     //Travel in CCW order around the edges of vertex v from the edge e looking for the next frontier edge
