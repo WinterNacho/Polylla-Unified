@@ -34,8 +34,8 @@ int main(int argc, char **argv) {
         
         mesh.print_stats(output + ".json");
         std::cout<<"output json in "<<output<<".json"<<std::endl;
-        //mesh.print_OFF(output+".off");
-        //std::cout<<"output off in "<<output<<".off"<<std::endl;
+        mesh.print_OFF(output+".off");
+        std::cout<<"output off in "<<output<<".off"<<std::endl;
         //mesh.print_ALE(output+".ale");
         //std::cout<<"output ale in "<<output<<".ale"<<std::endl;
     }else if (argc == 3){

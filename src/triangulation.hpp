@@ -757,6 +757,16 @@ int incident_halfedge(int f)
 {
     return 3*f;
 }
+
+int index_face(int e) {
+    return e / 3;
+}
+
+int region_face(int f) {
+    if(triangle_regions.size() > 0 && f < triangle_regions.size())
+        return triangle_regions.at(f);
+    return 0;
+}
 };
 
 #endif
