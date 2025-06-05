@@ -129,17 +129,24 @@ private:
     }
 
     //Read triangle file in .ele format and stores it in faces vector
-    std::vector<int> read_triangles_from_file(std::string name){
+    std::vector<int> read_triangles_from_file(std::string name, bool read_regions = false){
         std::vector<int> faces;
         std::string line;
         std::ifstream elefile(name);
         //std::cout<<"Node file"<<std::endl;
         
         if (elefile.is_open()) {
-            int nodes_per_triangle, hasRegion;
-            elefile >> n_faces >> nodes_per_triangle >> hasRegion; // Asumming the atribute is region always
+            int nodes_per_triangle, has_attributes;
+            elefile >> n_faces >> nodes_per_triangle >> has_attributes; // Assuming the attribute is region always
             faces.reserve(3*n_faces);
-            if (hasRegion > 0) {
+            
+            // Safety check: if regions are requested but file has no attributes
+            if (read_regions && has_attributes == 0) {
+                std::cout << "Warning: Region processing requested but no attributes found in .ele file" << std::endl;
+                std::cout << "Regions will be ignored for this mesh" << std::endl;
+            }
+            
+            if (has_attributes > 0 && read_regions) {
                 triangle_regions.reserve(n_faces);
             }
             
@@ -156,7 +163,7 @@ private:
                     faces.push_back(v2);
                     faces.push_back(v3);
                     
-                    if (hasRegion > 0)
+                    if (has_attributes > 0 && read_regions)
                     {
                         int region;
                         iss >> region;
@@ -429,14 +436,14 @@ public:
     Triangulation() {}
 
     //Constructor from file
-    Triangulation(std::string node_file, std::string ele_file, std::string neigh_file) {
+    Triangulation(std::string node_file, std::string ele_file, std::string neigh_file, bool use_regions = false) {
         std::vector<int> faces;
         std::vector<int> neighs;
         std::cout<<"Reading node file"<<std::endl;
         read_nodes_from_file(node_file);
         //fusionar estos dos métodos
         std::cout<<"Reading ele file"<<std::endl;
-        faces = read_triangles_from_file(ele_file);
+        faces = read_triangles_from_file(ele_file, use_regions);
         std::cout<<"Reading neigh file"<<std::endl;
         neighs = read_neigh_from_file(neigh_file);
 
@@ -452,12 +459,32 @@ public:
         auto t_end = std::chrono::high_resolution_clock::now();
         t_triangulation_generation = std::chrono::duration<double, std::milli>(t_end-t_start).count();
     }
-
-    Triangulation(std::string OFF_file){
+    
+    Triangulation(std::string OFF_file, bool use_regions = false){
         std::cout<<"Reading OFF file "<<OFF_file<<std::endl;
         std::vector<int> faces = read_OFFfile(OFF_file);
 
         std::cout<<"Constructing interior halfedges"<<std::endl;
+        auto t_start = std::chrono::high_resolution_clock::now();
+        HalfEdges.reserve(3*n_vertices);
+        //std::cout<<"Constructing interior halfedges"<<std::endl;
+        construct_interior_halfEdges_from_faces(faces);
+        //std::cout<<"Constructing exterior halfedges"<<std::endl;
+        construct_exterior_halfEdges();
+
+        auto t_end = std::chrono::high_resolution_clock::now();
+        t_triangulation_generation = std::chrono::duration<double, std::milli>(t_end-t_start).count();
+    }
+
+    //Constructor from node and ele files only (without neigh)
+    Triangulation(std::string node_file, std::string ele_file, bool use_regions = false) {
+        std::vector<int> faces;
+        std::cout<<"Reading node file"<<std::endl;
+        read_nodes_from_file(node_file);
+        std::cout<<"Reading ele file"<<std::endl;
+        faces = read_triangles_from_file(ele_file, use_regions);
+
+        //calculation of the time to build the data structure
         auto t_start = std::chrono::high_resolution_clock::now();
         HalfEdges.reserve(3*n_vertices);
         //std::cout<<"Constructing interior halfedges"<<std::endl;

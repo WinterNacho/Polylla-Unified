@@ -43,6 +43,9 @@ private:
     std::vector<int> triangle_list;
     bit_vector seed_bet_mark;
 
+    // Configuration flags
+    bool use_regions = false; // Control region boundary processing
+
     //Statistics
     int m_polygons = 0; //Number of polygons
     int n_frontier_edges = 0; //Number of frontier edges
@@ -63,27 +66,37 @@ public:
     Polylla() {}; //Default constructor
 
     //Constructor with triangulation
-    Polylla(Triangulation *input_mesh){
+    Polylla(Triangulation *input_mesh, bool use_regions = false){
         this->mesh_input = input_mesh;
+        this->use_regions = use_regions;
         construct_Polylla();
     }
 
     //Constructor from a OFF file
-    Polylla(std::string off_file){
-
-        this->mesh_input = new Triangulation(off_file);
+    Polylla(std::string off_file, bool use_regions = false){
+        this->mesh_input = new Triangulation(off_file, use_regions);
+        this->use_regions = use_regions;
         mesh_output = new Triangulation(*mesh_input);
         construct_Polylla();
     }
 
     //Constructor from a node_file, ele_file and neigh_file
-    Polylla(std::string node_file, std::string ele_file, std::string neigh_file){
-        this->mesh_input = new Triangulation(node_file, ele_file, neigh_file);
+    Polylla(std::string node_file, std::string ele_file, std::string neigh_file, bool use_regions = false){
+        this->mesh_input = new Triangulation(node_file, ele_file, neigh_file, use_regions);
+        this->use_regions = use_regions;
         //call copy constructor
         mesh_output = new Triangulation(*mesh_input);
         construct_Polylla();
     }
 
+    //Constructor from a node_file and ele_file only (without neigh_file)
+    Polylla(std::string node_file, std::string ele_file, bool use_regions = false){
+        this->mesh_input = new Triangulation(node_file, ele_file, use_regions);
+        this->use_regions = use_regions;
+        //call copy constructor
+        mesh_output = new Triangulation(*mesh_input);
+        construct_Polylla();
+    }
 
     //Constructor random data construictor
     Polylla(int size){
@@ -101,6 +114,15 @@ public:
         triangle_list.clear();
         delete mesh_input;
         delete mesh_output;
+    }
+
+    // Configuration methods
+    void set_use_regions(bool use_regions) {
+        this->use_regions = use_regions;
+    }
+
+    bool get_use_regions() const {
+        return use_regions;
     }
 
     void construct_Polylla(){
@@ -316,7 +338,7 @@ public:
             out << mesh_input->get_PointX(i) << " " << mesh_input->get_PointY(i) << " 0" << std::endl;
         }
 
-        // Print polygons with region-based color
+        // Print polygons
         for (int i = 0; i < m_polygons; i++) {
             int e_init = output_seeds[i];
             int e_curr = e_init;
@@ -328,19 +350,24 @@ public:
                 e_curr = mesh_output->next(e_curr);
             } while (e_curr != e_init);
 
-            // Get region from the original mesh (via first halfedge)
-            int region = mesh_input->region_face(mesh_input->index_face(e_init));
-
-            // Generate different RGB colors using prime numbers based on the region to obtain different colors for each region
-            float r = (region * 73 % 256) / 255.0f;
-            float g = (region * 149 % 256) / 255.0f;
-            float b = (region * 233 % 256) / 255.0f;
-
-            // Write polygon with RGBA color
+            // Write polygon
             out << polygon_vertices.size();
             for (int v : polygon_vertices)
                 out << " " << v;
-            out << " " << r << " " << g << " " << b << " 1.0" << std::endl;
+                
+            // Add colors only if using regions
+            if (use_regions) {
+                // Get region from the original mesh (via first halfedge)
+                int region = mesh_input->region_face(mesh_input->index_face(e_init));
+
+                // Generate different RGB colors using prime numbers based on the region
+                float r = (region * 73 % 256) / 255.0f;
+                float g = (region * 149 % 256) / 255.0f;
+                float b = (region * 233 % 256) / 255.0f;
+
+                out << " " << r << " " << g << " " << b << " 1.0";
+            }
+            out << std::endl;
         }
 
         out.close();
@@ -356,11 +383,14 @@ private:
         bool is_terminal_edge = (mesh_input->is_interior_face(twin) && (max_edges[e] && max_edges[twin]));
         bool is_terminal_border_edge = (mesh_input->is_border_face(twin) && max_edges[e]);
         
-        bool is_region_boundary = false;
-        int region1 = mesh_input->region_face(mesh_input->index_face(e));
-        int region2 = mesh_input->region_face(mesh_input->index_face(twin));
-        is_region_boundary = (region1 != region2);
-        bool is_terminal_region_edge = (is_region_boundary && max_edges[e]);
+        bool is_terminal_region_edge = false;
+        if (use_regions) {
+            bool is_region_boundary = false;
+            int region1 = mesh_input->region_face(mesh_input->index_face(e));
+            int region2 = mesh_input->region_face(mesh_input->index_face(twin));
+            is_region_boundary = (region1 != region2);
+            is_terminal_region_edge = (is_region_boundary && max_edges[e]);
+        }
 
         if((is_terminal_edge && e < twin) || is_terminal_border_edge || is_terminal_region_edge){
             return true;
@@ -430,9 +460,11 @@ private:
         bool is_not_max_edge = !(max_edges[e] || max_edges[twin]);
 
         bool is_region_boundary = false;
-        int region1 = mesh_input->region_face(mesh_input->index_face(e));
-        int region2 = mesh_input->region_face(mesh_input->index_face(twin));
-        is_region_boundary = (region1 != region2);
+        if (use_regions) {
+            int region1 = mesh_input->region_face(mesh_input->index_face(e));
+            int region2 = mesh_input->region_face(mesh_input->index_face(twin));
+            is_region_boundary = (region1 != region2);
+        }
         
         return is_border_edge || is_not_max_edge || is_region_boundary;
 
