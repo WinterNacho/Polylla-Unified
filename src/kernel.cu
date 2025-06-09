@@ -361,13 +361,13 @@ static __device__ T zero() {
 #include <mma.h>
 #include <cub/cub.cuh> 
 
-// CUDA compatibility guards
-#if defined(__CUDA_ARCH__) && CUDA_VERSION >= 12000
+// CUDA compatibility guards - simplified approach
+#if CUDA_VERSION >= 12000
     // CUDA 12.x and later: explicit namespace handling
     #include <cuda_fp16.h>
     using namespace nvcuda::wmma;
-#elif defined(__CUDA_ARCH__)
-    // CUDA 11.x and earlier: legacy namespace usage
+#else
+    // CUDA 11.x and earlier: legacy namespace usage  
     using namespace nvcuda;
 #endif
 
