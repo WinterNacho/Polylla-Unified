@@ -595,4 +595,47 @@ public:
     }
 };
 
+extern "C" {
+    // C wrapper functions for interfacing with the PolyllaGPU class
+    void* polylla_gpu_create_default() {
+        return new PolyllaGPU();
+    }
+    
+    void* polylla_gpu_create_int(int size) {
+        return new PolyllaGPU(size);
+    }
+    
+    void* polylla_gpu_create_off(const char* off_file, bool use_regions) {
+        return new PolyllaGPU(std::string(off_file), use_regions);
+    }
+    
+    void* polylla_gpu_create_neigh(const char* node_file, const char* ele_file, const char* neigh_file, bool use_regions) {
+        return new PolyllaGPU(std::string(node_file), std::string(ele_file), std::string(neigh_file), use_regions);
+    }
+    
+    void* polylla_gpu_create_ele(const char* node_file, const char* ele_file, bool use_regions) {
+        return new PolyllaGPU(std::string(node_file), std::string(ele_file), use_regions);
+    }
+    
+    void polylla_gpu_destroy(void* instance) {
+        delete static_cast<PolyllaGPU*>(instance);
+    }
+    
+    void polylla_gpu_print_stats(void* instance, const char* filename) {
+        static_cast<PolyllaGPU*>(instance)->print_stats(std::string(filename));
+    }
+    
+    void polylla_gpu_print_off(void* instance, const char* filename) {
+        static_cast<PolyllaGPU*>(instance)->print_OFF(std::string(filename));
+    }
+    
+    void polylla_gpu_set_use_regions(void* instance, bool use_regions) {
+        static_cast<PolyllaGPU*>(instance)->set_use_regions(use_regions);
+    }
+    
+    bool polylla_gpu_get_use_regions(void* instance) {
+        return static_cast<PolyllaGPU*>(instance)->get_use_regions();
+    }
+}
+
 #endif // POLYLLA_GPU_CU

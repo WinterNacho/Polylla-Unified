@@ -338,11 +338,11 @@ static __device__ T zero() {
 
 #if __CUDA_ARCH__ >= 700
 using namespace nvcuda;
-#endif
 static const int M              = 16;
 static const int N              = 16;
 static const int K              = 16;
 static const int WMMA_TILE_SIZE = (M * N);
+#endif
 
 template <typename T>
 __global__ void add_partial_sums_2(T *output, half *d_in, T *sums_warp, T *sums_block, int num_elements) {
@@ -363,6 +363,8 @@ static __global__ void compute_wmma_segmented_prefixsum_256n_block_ps_2(V *d_out
 	
 	T acc = 0;
 	//__shared__ T partial_acc;
+	
+#if __CUDA_ARCH__ >= 700
 	__shared__ half u_frag_s[WMMA_TILE_SIZE];
 	__shared__ half l_frag_s[WMMA_TILE_SIZE];
 	__shared__ half la_mat_s[SEGMENT_SIZE];
@@ -387,8 +389,6 @@ static __global__ void compute_wmma_segmented_prefixsum_256n_block_ps_2(V *d_out
 	}
 	
 	__syncthreads();
-	
-#if __CUDA_ARCH__ >= 700
 	wmma::fragment<wmma::matrix_a, M, N, K, half, wmma::row_major> a_frag;
 	wmma::fragment<wmma::matrix_b, M, N, K, half, wmma::row_major> b_frag;
 	wmma::fragment<wmma::matrix_b, M, N, K, half, wmma::row_major> u_frag;
@@ -427,7 +427,11 @@ static __global__ void compute_wmma_segmented_prefixsum_256n_block_ps_2(V *d_out
 	__syncthreads();
 	// then, do the scan on the warp accumulation
 	if (threadIdx.x < WARP_PER_BLOCK) {
+#if __CUDA_ARCH__ >= 700
 		acc = d_out[threadIdx.x*WMMA_TILE_SIZE + blockIdx.x*SEGMENT_SIZE + WMMA_TILE_SIZE - 1];
+#else
+		acc = d_out[threadIdx.x*256 + blockIdx.x*SEGMENT_SIZE + 256 - 1];
+#endif
 		//printf("-> %i %i %i\n",threadIdx.x, threadIdx.x*256 + blockIdx.x*8192 + 255, (int)acc);
 	}
 	__syncthreads();
@@ -438,7 +442,11 @@ static __global__ void compute_wmma_segmented_prefixsum_256n_block_ps_2(V *d_out
     // Obtain one input item per thread
     // Compute inclusive warp-wide prefix sums
 	//__syncthreads();
+#if __CUDA_ARCH__ >= 700
     WarpScan(temp_storage[globalWarpIdx]).InclusiveSum(acc, acc);
+#else
+    WarpScan(temp_storage[0]).InclusiveSum(acc, acc);
+#endif
 	__syncthreads(); 
 
 	if (threadIdx.x < WARP_PER_BLOCK - 1) {
