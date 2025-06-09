@@ -19,6 +19,12 @@ if(CUDA_AVAILABLE)
     # Use GPU version with CUDA
     add_library(meshfiles STATIC ${POLYLLA_CPU_FILES} ${POLYLLA_GPU_FILES})
     set_target_properties(meshfiles PROPERTIES LINKER_LANGUAGE CXX)
+    
+    # Add include directories for external dependencies (only needed for CUDA version)
+    target_include_directories(meshfiles PRIVATE 
+        ${CMAKE_CURRENT_SOURCE_DIR}/../external
+    )
+    
     message(STATUS "Building with GPU version (CUDA files)")
 else()
     # Use CPU version only
