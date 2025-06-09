@@ -361,15 +361,12 @@ static __device__ T zero() {
 #include <mma.h>
 #include <cub/cub.cuh> 
 
-// CUDA compatibility guards - simplified approach
+// CUDA compatibility guards - use full namespace paths for maximum compatibility
 #if CUDA_VERSION >= 12000
-    // CUDA 12.x and later: explicit namespace handling
     #include <cuda_fp16.h>
-    using namespace nvcuda::wmma;
-#else
-    // CUDA 11.x and earlier: legacy namespace usage  
-    using namespace nvcuda;
 #endif
+
+// Always use fully qualified names for better compatibility
 
 // Helper function for explicit half comparisons
 __device__ __forceinline__ bool half_equals_one(half val) {
@@ -424,39 +421,39 @@ static __global__ void compute_wmma_segmented_prefixsum_256n_block_ps_2(V *d_out
 	
 	__syncthreads();
 	
-	fragment<matrix_a, M, N, K, half, row_major> a_frag;
-	fragment<matrix_b, M, N, K, half, row_major> b_frag;
-	fragment<matrix_b, M, N, K, half, row_major> u_frag;
-	fragment<matrix_a, M, N, K, half, row_major> l_frag;
-	fragment<matrix_b, M, N, K, half, row_major> o_frag;
-	fragment<accumulator, M, N, K, half> la_frag;
-	fragment<matrix_a, M, N, K, half, row_major> la_mat_frag;
-	fragment<accumulator, M, N, K, half> au_frag;
-	fragment<accumulator, M, N, K, half> out_frag;
+	nvcuda::wmma::fragment<nvcuda::wmma::matrix_a, M, N, K, half, nvcuda::wmma::row_major> a_frag;
+	nvcuda::wmma::fragment<nvcuda::wmma::matrix_b, M, N, K, half, nvcuda::wmma::row_major> b_frag;
+	nvcuda::wmma::fragment<nvcuda::wmma::matrix_b, M, N, K, half, nvcuda::wmma::row_major> u_frag;
+	nvcuda::wmma::fragment<nvcuda::wmma::matrix_a, M, N, K, half, nvcuda::wmma::row_major> l_frag;
+	nvcuda::wmma::fragment<nvcuda::wmma::matrix_b, M, N, K, half, nvcuda::wmma::row_major> o_frag;
+	nvcuda::wmma::fragment<nvcuda::wmma::accumulator, M, N, K, half> la_frag;
+	nvcuda::wmma::fragment<nvcuda::wmma::matrix_a, M, N, K, half, nvcuda::wmma::row_major> la_mat_frag;
+	nvcuda::wmma::fragment<nvcuda::wmma::accumulator, M, N, K, half> au_frag;
+	nvcuda::wmma::fragment<nvcuda::wmma::accumulator, M, N, K, half> out_frag;
 	
-	load_matrix_sync(u_frag, u_frag_s, 16);
-	load_matrix_sync(l_frag, l_frag_s, 16);
-	fill_fragment(o_frag, one<half>());
-	fill_fragment(out_frag, zero<half>());
+	nvcuda::wmma::load_matrix_sync(u_frag, u_frag_s, 16);
+	nvcuda::wmma::load_matrix_sync(l_frag, l_frag_s, 16);
+	nvcuda::wmma::fill_fragment(o_frag, one<half>());
+	nvcuda::wmma::fill_fragment(out_frag, zero<half>());
 
-	fill_fragment(out_frag, zero<half>());
-	fill_fragment(la_frag, zero<half>());
-	load_matrix_sync(a_frag, d_in + offset, 16);
-	load_matrix_sync(b_frag, d_in + offset, 16);
+	nvcuda::wmma::fill_fragment(out_frag, zero<half>());
+	nvcuda::wmma::fill_fragment(la_frag, zero<half>());
+	nvcuda::wmma::load_matrix_sync(a_frag, d_in + offset, 16);
+	nvcuda::wmma::load_matrix_sync(b_frag, d_in + offset, 16);
 
-	mma_sync(au_frag, a_frag, u_frag, out_frag);
-	mma_sync(la_frag, l_frag, b_frag, la_frag);
+	nvcuda::wmma::mma_sync(au_frag, a_frag, u_frag, out_frag);
+	nvcuda::wmma::mma_sync(la_frag, l_frag, b_frag, la_frag);
 
 	// store accumulator la_frag into shared memory and load it into
 	// matrix_a
 	// fragment la_mat_frag
-	store_matrix_sync(la_mat_s + local_offset, la_frag, 16, mem_row_major);
-	load_matrix_sync(la_mat_frag, la_mat_s + local_offset, 16);
+	nvcuda::wmma::store_matrix_sync(la_mat_s + local_offset, la_frag, 16, nvcuda::wmma::mem_row_major);
+	nvcuda::wmma::load_matrix_sync(la_mat_frag, la_mat_s + local_offset, 16);
 
-	mma_sync(out_frag, la_mat_frag, o_frag, au_frag);
+	nvcuda::wmma::mma_sync(out_frag, la_mat_frag, o_frag, au_frag);
 
-	store_matrix_sync(d_out + offset, out_frag, 16, mem_row_major);
-	//store_matrix_sync(l_out + local_offset, out_frag, 16, mem_row_major);
+	nvcuda::wmma::store_matrix_sync(d_out + offset, out_frag, 16, nvcuda::wmma::mem_row_major);
+	//nvcuda::wmma::store_matrix_sync(l_out + local_offset, out_frag, 16, nvcuda::wmma::mem_row_major);
 
 	__syncthreads();
 	// then, do the scan on the warp accumulation
