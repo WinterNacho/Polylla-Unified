@@ -251,15 +251,18 @@ int scan(int *d_out, int *d_in, int num_items){
     /*int *d_scan, *d_out;
     cudaMalloc(&d_out, sizeof(int)*num_items);
     cudaMalloc(&d_scan, sizeof(int)*num_items);*/
-    cub::DeviceScan::ExclusiveSum(d_temp_storage, temp_storage_bytes, d_in, d_out, num_items);
+    gpuErrchk(cub::DeviceScan::ExclusiveSum(d_temp_storage, temp_storage_bytes, d_in, d_out, num_items));
     // Allocate temporary storage
-    cudaMalloc(&d_temp_storage, temp_storage_bytes);
+    gpuErrchk(cudaMalloc(&d_temp_storage, temp_storage_bytes));
     // Run exclusive prefix sum
-    cub::DeviceScan::ExclusiveSum(d_temp_storage, temp_storage_bytes, d_in, d_out, num_items);
-    gpuErrchk( cudaDeviceSynchronize() );
-    cudaMemcpy(len, d_out+num_items-1, sizeof(int), cudaMemcpyDeviceToHost);
+    gpuErrchk(cub::DeviceScan::ExclusiveSum(d_temp_storage, temp_storage_bytes, d_in, d_out, num_items));
+    gpuErrchk(cudaDeviceSynchronize());
+    gpuErrchk(cudaMemcpy(len, d_out+num_items-1, sizeof(int), cudaMemcpyDeviceToHost));
     //gpuErrchk( cudaDeviceSynchronize() );
-    return *len;
+    gpuErrchk(cudaFree(d_temp_storage));
+    int result = *len;
+    delete[] len;
+    return result;
 }
 
 
@@ -305,11 +308,12 @@ template <typename T>
 void scan_parallel_cub(T *out, T *in, int n) {
     void     *d_temp_storage = NULL;
     size_t   temp_storage_bytes = 0;
-    cub::DeviceScan::ExclusiveSum(d_temp_storage, temp_storage_bytes, in, out, n); //kernelCallCheck();
+    gpuErrchk(cub::DeviceScan::ExclusiveSum(d_temp_storage, temp_storage_bytes, in, out, n)); //kernelCallCheck();  
     // Allocate temporary storage*/
-    cudaMalloc(&d_temp_storage, temp_storage_bytes); //kernelCallCheck();
+    gpuErrchk(cudaMalloc(&d_temp_storage, temp_storage_bytes)); //kernelCallCheck();
     // Run exclusive prefix sum
-    cub::DeviceScan::ExclusiveSum(d_temp_storage, temp_storage_bytes, in, out, n); //kernelCallCheck();
+    gpuErrchk(cub::DeviceScan::ExclusiveSum(d_temp_storage, temp_storage_bytes, in, out, n)); //kernelCallCheck();  
+    gpuErrchk(cudaFree(d_temp_storage));
 }
 
 template <typename T>
@@ -327,10 +331,14 @@ static __device__ T zero() {
 #define SEGMENT_SIZE 256 * WARP_PER_BLOCK
 #define BLOCK_DIM WARP_PER_BLOCK * WARPSIZE
 
-#include <cuda.h>
+#include <cuda_runtime.h>
+#include <cuda_fp16.h>
 #include <mma.h>
-#include <cub/cub.cuh> 
+#include <cub/cub.cuh>
+
+#if __CUDA_ARCH__ >= 700
 using namespace nvcuda;
+#endif
 static const int M              = 16;
 static const int N              = 16;
 static const int K              = 16;
@@ -380,6 +388,7 @@ static __global__ void compute_wmma_segmented_prefixsum_256n_block_ps_2(V *d_out
 	
 	__syncthreads();
 	
+#if __CUDA_ARCH__ >= 700
 	wmma::fragment<wmma::matrix_a, M, N, K, half, wmma::row_major> a_frag;
 	wmma::fragment<wmma::matrix_b, M, N, K, half, wmma::row_major> b_frag;
 	wmma::fragment<wmma::matrix_b, M, N, K, half, wmma::row_major> u_frag;
@@ -412,6 +421,7 @@ static __global__ void compute_wmma_segmented_prefixsum_256n_block_ps_2(V *d_out
 	wmma::mma_sync(out_frag, la_mat_frag, o_frag, au_frag);
 
 	wmma::store_matrix_sync(d_out + offset, out_frag, 16, wmma::mem_row_major);
+#endif
 	//wmma::store_matrix_sync(l_out + local_offset, out_frag, 16, wmma::mem_row_major);
 
 	__syncthreads();
@@ -455,17 +465,24 @@ void scan_parallel_tc_2(T *out, half *in, int n) {
 	T *sums_block;
 	T *sums_warp;
 	half *sums_thread;
-	cudaMalloc(&sums_block,sizeof(T)*num_block);
-	cudaMalloc(&sums_warp,sizeof(T)*(num_segments));
-	cudaMalloc(&sums_thread,sizeof(half)*n);
-    compute_wmma_segmented_prefixsum_256n_block_ps_2<T,half><<<gridDim, blockDim>>>(sums_thread, sums_warp, sums_block, in, n); kernelCallCheck();
-    cudaDeviceSynchronize();
+	gpuErrchk(cudaMalloc(&sums_block,sizeof(T)*num_block));
+	gpuErrchk(cudaMalloc(&sums_warp,sizeof(T)*(num_segments)));
+	gpuErrchk(cudaMalloc(&sums_thread,sizeof(half)*n));
+    compute_wmma_segmented_prefixsum_256n_block_ps_2<T,half><<<gridDim, blockDim>>>(sums_thread, sums_warp, sums_block, in, n); 
+    kernelCallCheck();
+    gpuErrchk(cudaDeviceSynchronize());
 	
 	T *aux;
-	cudaMalloc(&aux,sizeof(T)*num_block);
+	gpuErrchk(cudaMalloc(&aux,sizeof(T)*num_block));
 	scan_parallel_cub<T>(aux,sums_block,num_block); kernelCallCheck();
 	add_partial_sums_2<T><<<(n+BSIZE-1)/BSIZE, BSIZE>>>(out, sums_thread, sums_warp, aux, n); kernelCallCheck(); //<256, SEGMENT_SIZE>*/
-    cudaDeviceSynchronize();
+    gpuErrchk(cudaDeviceSynchronize());
+    
+    // Clean up memory allocations
+    gpuErrchk(cudaFree(sums_block));
+    gpuErrchk(cudaFree(sums_warp));
+    gpuErrchk(cudaFree(sums_thread));
+    gpuErrchk(cudaFree(aux));
 }
 
 
@@ -554,8 +571,9 @@ __global__ void label_extra_frontier_edge_d(halfEdge *HalfEdges, bit_vector_d *f
             frontier_edges[t1] = 1;
             frontier_edges[t2] = 1;
 
-            seed_edges[t1] = 1;
-            seed_edges[t2] = 1;
+            // Use explicit half conversion for CUDA 12.x compatibility
+            seed_edges[t1] = __float2half(1.0f);
+            seed_edges[t2] = __float2half(1.0f);
         }
     }  
 }
@@ -588,7 +606,8 @@ __global__ void search_frontier_edge_d(halfEdge *HalfEdges, bit_vector_d *fronti
 {
     int off = threadIdx.x + blockIdx.x*blockDim.x;
     if (off < n){
-        if(seed_edges[off] == __float2half(1.0f)){
+        // Use explicit conversion to avoid ambiguity in CUDA 12.x
+        if(__half2float(seed_edges[off]) == 1.0f){
             int nxt = off;
             //printf("%i %f\n",off,__half2float(seed_edges[off]));
             while(!frontier_edges[nxt])
@@ -596,8 +615,8 @@ __global__ void search_frontier_edge_d(halfEdge *HalfEdges, bit_vector_d *fronti
                 nxt = CW_edge_to_vertex_d(HalfEdges, nxt);
             }  
             if(nxt != off)
-                seed_edges[off] = 0;
-            seed_edges[nxt] = 1;
+                seed_edges[off] = __float2half(0.0f);
+            seed_edges[nxt] = __float2half(1.0f);
             //printf("%i %i\n",off,nxt);
         }
     }
@@ -631,7 +650,8 @@ __global__ void overwrite_seed_d(halfEdge *HalfEdges, int *seed_edges, int n){
 __global__ void overwrite_seed_d(halfEdge *HalfEdges, half *seed_edges, int n){
     int i = threadIdx.x + blockIdx.x * blockDim.x; 
     if (i < n){        
-        if(seed_edges[i] == __float2half(1.0f)){
+        // Use explicit conversion to avoid ambiguity in CUDA 12.x
+        if(__half2float(seed_edges[i]) == 1.0f){
             int e_init = i;
             int min_ind = e_init;
             int e_curr = next_d(HalfEdges, e_init);
@@ -642,9 +662,9 @@ __global__ void overwrite_seed_d(halfEdge *HalfEdges, half *seed_edges, int n){
             //printf("overwrite_seed_d %i %i %i\n", i ,e_init,min_ind);
             
             if(min_ind != i){
-                seed_edges[i] = 0;
+                seed_edges[i] = __float2half(0.0f);
             }
-            seed_edges[min_ind] = 1;
+            seed_edges[min_ind] = __float2half(1.0f);
         }
     }  
 }
