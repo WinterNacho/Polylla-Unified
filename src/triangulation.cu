@@ -67,17 +67,6 @@ struct halfEdge {
     int is_border; //1 if the halfedge is on the boundary, 0 otherwise
 };
 
-// Esta fue la unica función ql funciono, porque las weas nativas de c++ funcionan mal
-//https://stackoverflow.com/a/22395635
-// Returns false if the string contains any non-whitespace characters
-// Returns false if the string contains any non-ASCII characters
-bool isWhitespace(std::string s){
-    for(int index = 0; index < s.length(); index++)
-        if(!std::isspace(s[index]))
-            return false;
-    return true;
-}
-
 class Triangulation 
 {
 
