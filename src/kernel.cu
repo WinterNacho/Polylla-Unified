@@ -1,5 +1,14 @@
 #include "triangulation.cu"
 
+// Compatibility guards for CUDA compilation
+#ifdef __CUDACC__
+    // CUDA compilation detected
+    #ifndef CUDA_VERSION
+        // Fallback if CUDA_VERSION is not defined
+        #define CUDA_VERSION 11000
+    #endif
+#endif
+
 // Here starts the gpu code!!!!!!!
 
 typedef int bit_vector_d;
@@ -312,6 +321,7 @@ void scan_parallel_cub(T *out, T *in, int n) {
     cub::DeviceScan::ExclusiveSum(d_temp_storage, temp_storage_bytes, in, out, n); //kernelCallCheck();
 }
 
+// Template functions with CUDA version compatibility
 template <typename T>
 static __device__ T one() {
   	return T{1};
@@ -322,6 +332,26 @@ static __device__ T zero() {
   	return T{0};
 }
 
+#if CUDA_VERSION >= 12000
+    // CUDA 12.x: Explicit specializations for half type
+    template <>
+    __device__ half one<half>() {
+        return __float2half(1.0f);
+    }
+
+    template <>
+    __device__ half zero<half>() {
+        return __float2half(0.0f);
+    }
+#endif
+
+/*
+ * CUDA Compatibility Notes:
+ * - CUDA ≤11.x: Uses legacy namespace handling and automatic template functions
+ * - CUDA 12.x+: Requires explicit namespace aliasing and half type specializations
+ * - Non-CUDA: Graceful degradation with version fallback
+ */
+
 #define WARPSIZE 32
 #define WARP_PER_BLOCK 32
 #define SEGMENT_SIZE 256 * WARP_PER_BLOCK
@@ -330,7 +360,16 @@ static __device__ T zero() {
 #include <cuda.h>
 #include <mma.h>
 #include <cub/cub.cuh> 
-using namespace nvcuda;
+
+// CUDA compatibility guards
+#if CUDA_VERSION >= 12000
+    // CUDA 12.x and later: explicit namespace handling
+    #include <cuda_fp16.h>
+    namespace wmma = nvcuda::wmma;
+#else
+    // CUDA 11.x and earlier: legacy namespace usage
+    using namespace nvcuda;
+#endif
 static const int M              = 16;
 static const int N              = 16;
 static const int K              = 16;
