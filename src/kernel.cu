@@ -362,16 +362,19 @@ static __device__ T zero() {
 #include <cub/cub.cuh> 
 
 // CUDA compatibility guards
-#if CUDA_VERSION >= 12000
+#if defined(__CUDA_ARCH__) && CUDA_VERSION >= 12000
     // CUDA 12.x and later: explicit namespace handling
     #include <cuda_fp16.h>
-    // Use fully qualified names instead of namespace aliases
-    #define WMMA_NAMESPACE nvcuda::wmma
-#else
+    using namespace nvcuda::wmma;
+#elif defined(__CUDA_ARCH__)
     // CUDA 11.x and earlier: legacy namespace usage
     using namespace nvcuda;
-    #define WMMA_NAMESPACE wmma
 #endif
+
+// Helper function for explicit half comparisons
+__device__ __forceinline__ bool half_equals_one(half val) {
+    return __half2float(val) == 1.0f;
+}
 static const int M              = 16;
 static const int N              = 16;
 static const int K              = 16;
@@ -421,39 +424,39 @@ static __global__ void compute_wmma_segmented_prefixsum_256n_block_ps_2(V *d_out
 	
 	__syncthreads();
 	
-	WMMA_NAMESPACE::fragment<WMMA_NAMESPACE::matrix_a, M, N, K, half, WMMA_NAMESPACE::row_major> a_frag;
-	WMMA_NAMESPACE::fragment<WMMA_NAMESPACE::matrix_b, M, N, K, half, WMMA_NAMESPACE::row_major> b_frag;
-	WMMA_NAMESPACE::fragment<WMMA_NAMESPACE::matrix_b, M, N, K, half, WMMA_NAMESPACE::row_major> u_frag;
-	WMMA_NAMESPACE::fragment<WMMA_NAMESPACE::matrix_a, M, N, K, half, WMMA_NAMESPACE::row_major> l_frag;
-	WMMA_NAMESPACE::fragment<WMMA_NAMESPACE::matrix_b, M, N, K, half, WMMA_NAMESPACE::row_major> o_frag;
-	WMMA_NAMESPACE::fragment<WMMA_NAMESPACE::accumulator, M, N, K, half> la_frag;
-	WMMA_NAMESPACE::fragment<WMMA_NAMESPACE::matrix_a, M, N, K, half, WMMA_NAMESPACE::row_major> la_mat_frag;
-	WMMA_NAMESPACE::fragment<WMMA_NAMESPACE::accumulator, M, N, K, half> au_frag;
-	WMMA_NAMESPACE::fragment<WMMA_NAMESPACE::accumulator, M, N, K, half> out_frag;
+	fragment<matrix_a, M, N, K, half, row_major> a_frag;
+	fragment<matrix_b, M, N, K, half, row_major> b_frag;
+	fragment<matrix_b, M, N, K, half, row_major> u_frag;
+	fragment<matrix_a, M, N, K, half, row_major> l_frag;
+	fragment<matrix_b, M, N, K, half, row_major> o_frag;
+	fragment<accumulator, M, N, K, half> la_frag;
+	fragment<matrix_a, M, N, K, half, row_major> la_mat_frag;
+	fragment<accumulator, M, N, K, half> au_frag;
+	fragment<accumulator, M, N, K, half> out_frag;
 	
-	WMMA_NAMESPACE::load_matrix_sync(u_frag, u_frag_s, 16);
-	WMMA_NAMESPACE::load_matrix_sync(l_frag, l_frag_s, 16);
-	WMMA_NAMESPACE::fill_fragment(o_frag, one<half>());
-	WMMA_NAMESPACE::fill_fragment(out_frag, zero<half>());
+	load_matrix_sync(u_frag, u_frag_s, 16);
+	load_matrix_sync(l_frag, l_frag_s, 16);
+	fill_fragment(o_frag, one<half>());
+	fill_fragment(out_frag, zero<half>());
 
-	WMMA_NAMESPACE::fill_fragment(out_frag, zero<half>());
-	WMMA_NAMESPACE::fill_fragment(la_frag, zero<half>());
-	WMMA_NAMESPACE::load_matrix_sync(a_frag, d_in + offset, 16);
-	WMMA_NAMESPACE::load_matrix_sync(b_frag, d_in + offset, 16);
+	fill_fragment(out_frag, zero<half>());
+	fill_fragment(la_frag, zero<half>());
+	load_matrix_sync(a_frag, d_in + offset, 16);
+	load_matrix_sync(b_frag, d_in + offset, 16);
 
-	WMMA_NAMESPACE::mma_sync(au_frag, a_frag, u_frag, out_frag);
-	WMMA_NAMESPACE::mma_sync(la_frag, l_frag, b_frag, la_frag);
+	mma_sync(au_frag, a_frag, u_frag, out_frag);
+	mma_sync(la_frag, l_frag, b_frag, la_frag);
 
 	// store accumulator la_frag into shared memory and load it into
 	// matrix_a
 	// fragment la_mat_frag
-	WMMA_NAMESPACE::store_matrix_sync(la_mat_s + local_offset, la_frag, 16, WMMA_NAMESPACE::mem_row_major);
-	WMMA_NAMESPACE::load_matrix_sync(la_mat_frag, la_mat_s + local_offset, 16);
+	store_matrix_sync(la_mat_s + local_offset, la_frag, 16, mem_row_major);
+	load_matrix_sync(la_mat_frag, la_mat_s + local_offset, 16);
 
-	WMMA_NAMESPACE::mma_sync(out_frag, la_mat_frag, o_frag, au_frag);
+	mma_sync(out_frag, la_mat_frag, o_frag, au_frag);
 
-	WMMA_NAMESPACE::store_matrix_sync(d_out + offset, out_frag, 16, WMMA_NAMESPACE::mem_row_major);
-	//WMMA_NAMESPACE::store_matrix_sync(l_out + local_offset, out_frag, 16, WMMA_NAMESPACE::mem_row_major);
+	store_matrix_sync(d_out + offset, out_frag, 16, mem_row_major);
+	//store_matrix_sync(l_out + local_offset, out_frag, 16, mem_row_major);
 
 	__syncthreads();
 	// then, do the scan on the warp accumulation
@@ -629,7 +632,7 @@ __global__ void search_frontier_edge_d(halfEdge *HalfEdges, bit_vector_d *fronti
 {
     int off = threadIdx.x + blockIdx.x*blockDim.x;
     if (off < n){
-        if(seed_edges[off] == __float2half(1.0f)){
+        if(half_equals_one(seed_edges[off])){
             int nxt = off;
             //printf("%i %f\n",off,__half2float(seed_edges[off]));
             while(!frontier_edges[nxt])
@@ -672,7 +675,7 @@ __global__ void overwrite_seed_d(halfEdge *HalfEdges, int *seed_edges, int n){
 __global__ void overwrite_seed_d(halfEdge *HalfEdges, half *seed_edges, int n){
     int i = threadIdx.x + blockIdx.x * blockDim.x; 
     if (i < n){        
-        if(seed_edges[i] == __float2half(1.0f)){
+        if(half_equals_one(seed_edges[i])){
             int e_init = i;
             int min_ind = e_init;
             int e_curr = next_d(HalfEdges, e_init);
