@@ -33,9 +33,6 @@ TODO:
     constructor indepent of triangle
 */
 
-#ifndef TRIANGULATION_HPP
-#define TRIANGULATION_HPP
-
 #include <algorithm>
 #include <initializer_list>
 #include <array>
@@ -47,6 +44,14 @@ TODO:
 #include <unordered_map>
 #include <map>
 #include <chrono>
+
+// Local function for CUDA version
+bool isWhitespace(std::string s){
+    for(int index = 0; index < s.length(); index++)
+        if(!std::isspace(s[index]))
+            return false;
+    return true;
+}
 
 struct vertex{
     double x;
@@ -790,5 +795,3 @@ public:
         return 0;
     }
 };
-
-#endif
