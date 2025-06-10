@@ -133,41 +133,13 @@ __device__ int compute_max_edge_d(halfEdge *HalfEdges, vertex *Vertices, int e){
     float l1 = distance_d(HalfEdges, Vertices, next_d(HalfEdges, e)); //mid
     float l2 = distance_d(HalfEdges, Vertices, prev_d(HalfEdges, e)); //max
 
-    /*float m1 = fmaxf(dist0, dist1);
-    float m2 = fmaxf(m1, dist2);    
-
-    //__syncthreads();
-    //printf ("off: %i dist0: %f, dist1: %f, dist2: %f, m1: %f, m2: %f\n", e, (float) dist0, (float) dist1, (float) dist2, (float) m1, (float) m2);
-
-    //if (m1 == m2)
-    //    printf ("off: %i dist0: %f, dist1: %f, dist2: %f, m1: %f, m2: %f\n", e, (float) dist0, (float) dist1, (float) dist2, (float) m1, (float) m2);
-
-    if(m2 == dist0)
+    // Find the longest edge of the triangle
+    if(fmaxf(fmaxf(l0, l1), l2) == l0)
         return e;
-    else if(m2 == dist1)
+    else if(fmaxf(fmaxf(l0, l1), l2) == l1)
         return next_d(HalfEdges, e);
     else
         return prev_d(HalfEdges, e);
-    return -1;*/
-
-    __syncthreads();
-    // compare two numbers at a time
-   //if((l0 >= l1 && l1 >= l2) || (l0 >= l2 && l2 >= l1))
-   if( (GreaterEqualthan(l0,l1,epsion) && GreaterEqualthan(l1,l2,epsion)) || ( GreaterEqualthan(l0,l2,epsion) && GreaterEqualthan(l2,l1,epsion)))
-   {
-           return e;
-   }
-   //else if((l1 >= l0 && l0 >= l2) || (l1 >= l2 && l2 >= l0))
-   else if((GreaterEqualthan(l1,l0,epsion) && GreaterEqualthan(l0,l2,epsion)) || ( GreaterEqualthan(l1,l2,epsion) && GreaterEqualthan(l2,l0,epsion)))
-   {
-           return next_d(HalfEdges, e);
-   }
-   else
-   {
-           return prev_d(HalfEdges, e);
-   }
-   __syncthreads();
-
 }
 
 __device__ bool is_frontier_edge_d(halfEdge *halfedges, bit_vector_d *max_edges, int *triangle_regions, int n_faces, const int e)
@@ -196,11 +168,6 @@ __global__ void label_edges_max_d(bit_vector_d *output, vertex *Vertices, halfEd
     if(off < n)
     {
         int edge_max_index = compute_max_edge_d(HalfEdges, Vertices, incident_halfedge_d(off));
-        __syncthreads();
-        //output[off] = max;
-        //output[off] = 0;
-        //printf("thread: %i, edge_max_index: %i\n", off, (int)edge_max_index);
-        //atomicAdd(output+edge_max_index, 1);
         output[edge_max_index] = 1;
     }
 }
@@ -225,7 +192,7 @@ __global__ void seed_phase_d(halfEdge *HalfEdges, bit_vector_d *max_edges, half 
     int y = threadIdx.y + blockIdx.y * blockDim.y;
     int off = x + y * blockDim.x * gridDim.x;
     if (off < n){
-        //seed_edges[off] = 0;
+        seed_edges[off] = 0;
         if(is_interior_face_d(HalfEdges, off) && is_seed_edge_d(HalfEdges, max_edges, triangle_regions, n_faces, off))
             seed_edges[off] = 1;
         }
@@ -676,3 +643,4 @@ __global__ void overwrite_seed_d(halfEdge *HalfEdges, half *seed_edges, int n){
         }
     }  
 }
+
