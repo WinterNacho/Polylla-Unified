@@ -69,7 +69,7 @@ struct halfEdge {
 //https://stackoverflow.com/a/22395635
 // Returns false if the string contains any non-whitespace characters
 // Returns false if the string contains any non-ASCII characters
-inline bool isWhitespace(std::string s){
+bool isWhitespace(std::string s){
     for(int index = 0; index < s.length(); index++)
         if(!std::isspace(s[index]))
             return false;
