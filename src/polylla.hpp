@@ -17,10 +17,22 @@
 #include <iomanip>
 
 #include <triangulation.hpp>
-
+#include <m_edge_ratio.hpp>
 
 #define print_e(eddddge) eddddge<<" ( "<<mesh_input->origin(eddddge)<<" - "<<mesh_input->target(eddddge)<<") "
 
+// Structure for Polylla configuration options
+struct PolyllaOptions {
+    // Region options
+    bool use_regions = false;
+    
+    // Smoothing options  
+    std::string smooth_method = "";           // "", "laplacian", "laplacian-edge-ratio", "distmesh"
+    int smooth_iterations = 50;               // default 50
+    double target_length = -1;                // -1 = auto-calculate
+};
+
+double epsilon = 1e-6;
 
 class Polylla
 {
@@ -43,8 +55,8 @@ private:
     std::vector<int> triangle_list;
     bit_vector seed_bet_mark;
 
-    // Configuration flags
-    bool use_regions = false; // Control region boundary processing
+    // Configuration options
+    PolyllaOptions options;
 
     //Statistics
     int m_polygons = 0; //Number of polygons
@@ -52,6 +64,7 @@ private:
     int n_barrier_edge_tips = 0; //Number of barrier edge tips
     int n_polygons_to_repair = 0;
     int n_polygons_added_after_repair = 0;
+    int n_smooth_iterations = 0;
 
     // Times
     double t_label_max_edges = 0;
@@ -60,40 +73,41 @@ private:
     double t_traversal_and_repair = 0;
     double t_traversal = 0;
     double t_repair = 0;
+    double t_smooth = 0;
     
 public:
 
     Polylla() {}; //Default constructor
 
     //Constructor with triangulation
-    Polylla(Triangulation *input_mesh, bool use_regions = false){
-        this->mesh_input = input_mesh;
-        this->use_regions = use_regions;
+    Polylla(Triangulation *input_mesh, const PolyllaOptions& options = PolyllaOptions()) 
+        : mesh_input(input_mesh), options(options) {
+        mesh_output = new Triangulation(*mesh_input);
         construct_Polylla();
     }
 
     //Constructor from a OFF file
-    Polylla(std::string off_file, bool use_regions = false){
-        this->mesh_input = new Triangulation(off_file, use_regions);
-        this->use_regions = use_regions;
+    Polylla(const std::string& off_file, const PolyllaOptions& options = PolyllaOptions()) 
+        : options(options) {
+        this->mesh_input = new Triangulation(off_file, options.use_regions);
         mesh_output = new Triangulation(*mesh_input);
         construct_Polylla();
     }
 
     //Constructor from a node_file, ele_file and neigh_file
-    Polylla(std::string node_file, std::string ele_file, std::string neigh_file, bool use_regions = false){
-        this->mesh_input = new Triangulation(node_file, ele_file, neigh_file, use_regions);
-        this->use_regions = use_regions;
-        //call copy constructor
+    Polylla(const std::string& node_file, const std::string& ele_file, const std::string& neigh_file, 
+            const PolyllaOptions& options = PolyllaOptions()) 
+        : options(options) {
+        this->mesh_input = new Triangulation(node_file, ele_file, neigh_file, options.use_regions);
         mesh_output = new Triangulation(*mesh_input);
         construct_Polylla();
     }
 
     //Constructor from a node_file and ele_file only (without neigh_file)
-    Polylla(std::string node_file, std::string ele_file, bool use_regions = false){
-        this->mesh_input = new Triangulation(node_file, ele_file, use_regions);
-        this->use_regions = use_regions;
-        //call copy constructor
+    Polylla(const std::string& node_file, const std::string& ele_file, 
+            const PolyllaOptions& options = PolyllaOptions()) 
+        : options(options) {
+        this->mesh_input = new Triangulation(node_file, ele_file, options.use_regions);
         mesh_output = new Triangulation(*mesh_input);
         construct_Polylla();
     }
@@ -118,11 +132,11 @@ public:
 
     // Configuration methods
     void set_use_regions(bool use_regions) {
-        this->use_regions = use_regions;
+        this->options.use_regions = use_regions;
     }
 
     bool get_use_regions() const {
-        return use_regions;
+        return options.use_regions;
     }
 
     void construct_Polylla(){
@@ -143,7 +157,7 @@ public:
          
         auto t_end = std::chrono::high_resolution_clock::now();
         t_label_max_edges = std::chrono::duration<double, std::milli>(t_end-t_start).count();
-        std::cout<<"Labered max edges in "<<t_label_max_edges<<" ms"<<std::endl;
+        std::cout<<"Labeled max edges in "<<t_label_max_edges<<" ms"<<std::endl;
 
         t_start = std::chrono::high_resolution_clock::now();
         //Label frontier edges
@@ -191,6 +205,72 @@ public:
         
         this->m_polygons = output_seeds.size();
 
+        if (!options.smooth_method.empty()) {
+            t_start = std::chrono::high_resolution_clock::now();
+            
+            if (options.smooth_method == "laplacian") {
+                optimize_mesh_laplacian(options.smooth_iterations);
+            }
+            else if (options.smooth_method == "laplacian-edge-ratio") {
+                optimize_mesh_laplacian_constrained(options.smooth_iterations, "laplacian-edge-ratio");
+            }
+            else if (options.smooth_method == "distmesh") {
+                optimize_mesh_distmesh(options.smooth_iterations, options.target_length);
+            }
+            
+            t_end = std::chrono::high_resolution_clock::now();
+            t_smooth = std::chrono::duration<double, std::milli>(t_end-t_start).count();
+            std::cout<<"Optimized mesh in "<<t_smooth<<" ms using "<<options.smooth_method<<" method"<<std::endl;
+        }
+
+        // std::cout << mesh_output->get_PointX(508) << ", " << mesh_output->get_PointY(508) << std::endl;
+
+        // for(std::size_t v = 0; v < mesh_input->vertices(); v++) {
+
+        // }
+        
+//         for(std::size_t v = 0; v < mesh_input->vertices(); v++){
+//             mesh_input->set_PointX(v, mesh_input->get_PointX(v) + (rand() % 500 - 250));
+//             mesh_input->set_PointY(v, mesh_input->get_PointY(v) + (rand() % 500 - 250));
+//             std::cout<<mesh_input->get_PointX(v)<<" "<<mesh_input->get_PointY(v)<<" 0"<<std::endl; 
+// }
+        // std::size_t v = 156;
+        // std::cout << "new_ver" << std::endl;
+        // std::cout << mesh_input->degree(v);
+        // auto v_init = v;
+        // auto e_init = mesh_input->edge_of_vertex(v);
+        // auto e_curr = e_init;
+        // std::cout << "v_init" << v_init << std::endl;
+        // std::cout << "e_init" << e_init << std::endl;
+        // do {
+        //     auto v_curr = mesh_input->target(e_curr);
+        //     std::cout << "origen: " << mesh_input->origin(e_curr) << std::endl;
+        //     std::cout << v_curr << std::endl;
+        //     // std::cout << v_curr << std::endl;
+        //     auto e_twin = mesh_input->twin(e_curr);
+        //     e_curr = mesh_input->next(e_twin);
+        //     std::cout << "v_curr" << v_curr << std::endl;
+        //     std::cout << "e_curr" << e_curr << std::endl;
+        //     // std::cout << mesh_input->origin(e_curr) << std::endl;
+        // } while (e_curr != e_init);
+        // e_init = mesh_output->edge_of_vertex(v);
+        // auto e_next = mesh_output->CCW_edge_to_vertex(e_init);
+        // std::vector<int> seen = {e_init};
+        // std::cout << "v_init" << v_init << std::endl;
+        // std::cout << "e_init" << e_init << std::endl;
+        // while (std::find(seen.begin(), seen.end(), e_next) == seen.end()) {
+        //     seen.push_back(e_next);
+        //     auto v_curr = mesh_output->target(e_next);
+        //     std::cout << "origen: " << mesh_output->origin(e_next) << std::endl;
+        //     std::cout << v_curr << std::endl;
+        //     // std::cout << v_curr << std::endl;
+        //     auto e_twin = mesh_output->twin(e_next);
+        //     e_next = mesh_output->next(e_twin);
+        //     std::cout << "v_curr" << v_curr << std::endl;
+        //     std::cout << "e_curr" << e_next << std::endl;
+            // std::cout << mesh_input->origin(e_curr) << std::endl;
+        // }
+        
         std::cout<<"Mesh with "<<m_polygons<<" polygons "<<n_frontier_edges/2<<" edges and "<<n_barrier_edge_tips<<" barrier-edge tips."<<std::endl;
         //mesh_input->print_pg(std::to_string(mesh_input->vertices()) + ".pg");             
     }
@@ -202,11 +282,12 @@ public:
         std::cout<<"Time to label max edges "<<t_label_max_edges<<" ms"<<std::endl;
         std::cout<<"Time to label frontier edges "<<t_label_frontier_edges<<" ms"<<std::endl;
         std::cout<<"Time to label seed edges "<<t_label_seed_edges<<" ms"<<std::endl;
-        std::cout<<"Time to label total"<<t_label_max_edges+t_label_frontier_edges+t_label_seed_edges<<" ms"<<std::endl;
+        std::cout<<"Time to label total "<<t_label_max_edges+t_label_frontier_edges+t_label_seed_edges<<" ms"<<std::endl;
         std::cout<<"Time to traversal and repair "<<t_traversal_and_repair<<" ms"<<std::endl;
         std::cout<<"Time to traversal "<<t_traversal<<" ms"<<std::endl;
         std::cout<<"Time to repair "<<t_repair<<" ms"<<std::endl;
-        std::cout<<"Time to generate polygonal mesh "<<t_label_max_edges + t_label_frontier_edges + t_label_seed_edges + t_traversal_and_repair<<" ms"<<std::endl;
+        std::cout<<"Time to smooth "<<t_smooth<<" ms"<<std::endl;
+        std::cout<<"Time to generate polygonal mesh "<<t_label_max_edges + t_label_frontier_edges + t_label_seed_edges + t_traversal_and_repair + t_smooth<<" ms"<<std::endl;
 
         //Memory
         long long m_max_edges =  sizeof(decltype(max_edges.back())) * max_edges.capacity();
@@ -230,6 +311,7 @@ public:
         out<<"\"n_vertices\": "<<mesh_input->vertices()<<","<<std::endl;
         out<<"\"n_polygons_to_repair\": "<<n_polygons_to_repair<<","<<std::endl;
         out<<"\"n_polygons_added_after_repair\": "<<n_polygons_added_after_repair<<","<<std::endl;
+        out<<"\"n_smooth_iterations\": "<<n_smooth_iterations<<","<<std::endl;
         out<<"\"time_triangulation_generation\": "<<mesh_input->get_triangulation_generation_time()<<","<<std::endl;
         out<<"\"time_to_label_max_edges\": "<<t_label_max_edges<<","<<std::endl;
         out<<"\"time_to_label_frontier_edges\": "<<t_label_frontier_edges<<","<<std::endl;
@@ -238,7 +320,8 @@ public:
         out<<"\"time_to_traversal_and_repair\": "<<t_traversal_and_repair<<","<<std::endl;
         out<<"\"time_to_traversal\": "<<t_traversal<<","<<std::endl;
         out<<"\"time_to_repair\": "<<t_repair<<","<<std::endl;
-        out<<"\"time_to_generate_polygonal_mesh\": "<<t_label_max_edges + t_label_frontier_edges + t_label_seed_edges + t_traversal_and_repair<<","<<std::endl;
+        out<<"\"time_to_smooth\": "<<t_smooth<<","<<std::endl;
+        out<<"\"time_to_generate_polygonal_mesh\": "<<t_label_max_edges + t_label_frontier_edges + t_label_seed_edges + t_traversal_and_repair + t_smooth<<","<<std::endl;
         out<<"\t\"memory_max_edges\": "<<m_max_edges<<","<<std::endl;
         out<<"\t\"memory_frontier_edge\": "<<m_frontier_edge<<","<<std::endl;
         out<<"\t\"memory_seed_edges\": "<<m_seed_edges<<","<<std::endl;
@@ -356,7 +439,7 @@ public:
                 out << " " << v;
                 
             // Add colors only if using regions
-            if (use_regions) {
+            if (options.use_regions) {
                 // Get region from the original mesh (via first halfedge)
                 int region = mesh_input->region_face(mesh_input->index_face(e_init));
 
@@ -384,7 +467,7 @@ private:
         bool is_terminal_border_edge = (mesh_input->is_border_face(twin) && max_edges[e]);
         
         bool is_terminal_region_edge = false;
-        if (use_regions) {
+        if (options.use_regions) {
             bool is_region_boundary = false;
             int region1 = mesh_input->region_face(mesh_input->index_face(e));
             int region2 = mesh_input->region_face(mesh_input->index_face(twin));
@@ -460,7 +543,7 @@ private:
         bool is_not_max_edge = !(max_edges[e] || max_edges[twin]);
 
         bool is_region_boundary = false;
-        if (use_regions) {
+        if (options.use_regions) {
             int region1 = mesh_input->region_face(mesh_input->index_face(e));
             int region2 = mesh_input->region_face(mesh_input->index_face(twin));
             is_region_boundary = (region1 != region2);
@@ -503,7 +586,7 @@ private:
         int e_init = search_frontier_edge(e);
         int e_curr = mesh_input->next(e_init);        
         int e_fe = e_init; 
-
+        // std::cout << "new" <<std::endl;
         //travel inside frontier-edges of polygon
         do{   
             e_curr = search_frontier_edge(e_curr);
@@ -511,6 +594,14 @@ private:
             mesh_output->set_next(e_fe, e_curr);  
             //update prev of current frontier-edge
             mesh_output->set_prev(e_curr, e_fe);
+
+            int v_curr = mesh_input->target(e_fe);
+            int e_incident = mesh_input->twin(e_fe);
+            // std::cout << "travelling "<< v_curr << "-"<< std::endl;
+            // if (v_curr == 8||v_curr == 5||v_curr == 9||v_curr == 12||v_curr == 10||v_curr == 38||v_curr == 14) {
+            //     std::cout << "v " << v_curr << "e " <<e_incident << std::endl;
+            // }
+            mesh_output->set_incident_halfedge(v_curr, e_incident);
 
             //travel to next half-edge
             e_fe = e_curr;
@@ -679,6 +770,14 @@ private:
             //update prev of current frontier-edge
             mesh_output->set_prev(e_curr, e_fe);
 
+            // int v_curr = mesh_input->target(e_fe);
+            // int e_incident = mesh_input->twin(e_fe);
+            // std::cout << "repairing "<< v_curr << std::endl;
+            // if (v_curr == 8) {
+            //     std::cout << "v " << v_curr << "e " <<e_incident << std::endl;
+            // }
+            // mesh_output->set_incident_halfedge(v_curr, e_incident);
+
             //travel to next half-edge
             e_fe = e_curr;
             e_curr = mesh_input->next(e_curr);
@@ -687,7 +786,302 @@ private:
         }while(e_fe != e_init);
         return e_init;
     }
+
+    double area(int v0, int v1, int v2) {
+        double area =   (mesh_output->get_PointX(v1) - mesh_output->get_PointX(v0)) * 
+                        (mesh_output->get_PointY(v2) - mesh_output->get_PointY(v0)) - 
+                        (mesh_output->get_PointY(v1) - mesh_output->get_PointY(v0)) * 
+                        (mesh_output->get_PointX(v2) - mesh_output->get_PointX(v0));
+        return area;
+    }
+
+    bool is_left(int v0, int v1, int p) {
+        return area(v0, v1, p) > 0;
+    }
+
+    bool parallel(int e1, int e2) {
+        auto v0 = mesh_output->origin(e1);
+        auto v1 = mesh_output->target(e1);
+        auto v2 = mesh_output->origin(e2);
+        auto v3 = mesh_output->target(e2);
+        auto v0_x = mesh_output->get_PointX(v0);
+        auto v0_y = mesh_output->get_PointY(v0);
+        auto v1_x = mesh_output->get_PointX(v1);
+        auto v1_y = mesh_output->get_PointY(v1);
+        auto v2_x = mesh_output->get_PointX(v2);
+        auto v2_y = mesh_output->get_PointY(v2);
+        auto v3_x = mesh_output->get_PointX(v3);
+        auto v3_y = mesh_output->get_PointY(v3);
+        auto den = (v0_x - v1_x)*(v2_y - v3_y) - (v0_y - v1_y)*(v2_x - v3_x);
+        return std::abs(den) < epsilon;
+    }
+
+    bool is_collinear(int v0, int v1, int v2) {
+        double this_area = area(v0, v1, v2);
+        return std::abs(this_area) < epsilon;
+    }
+
+    bool in_range(int p, int v0, int v1) {
+        auto p_x = mesh_output->get_PointX(p);
+        auto p_y = mesh_output->get_PointY(p);
+        auto v0_x = mesh_output->get_PointX(v0);
+        auto v0_y = mesh_output->get_PointY(v0);
+        auto v1_x = mesh_output->get_PointX(v1);
+        auto v1_y = mesh_output->get_PointY(v1);
+        return  std::min(v0_x, v1_x) < p_x && p_x < std::max(v0_x, v1_x) && 
+                std::min(v0_y, v1_y) < p_y && p_y < std::max(v0_y, v1_y);
+    }
+
+    bool intersection(int e1, int e2) {
+        auto v0 = mesh_output->origin(e1);
+        auto v1 = mesh_output->target(e1);
+        auto v2 = mesh_output->origin(e2);
+        auto v3 = mesh_output->target(e2);
+        return is_left(v0, v1, v2) != is_left(v0, v1, v3) && is_left(v2, v3, v0) != is_left(v2, v3, v1);
+    }
+
+    bool is_valid_move(int v) {
+        auto e_init = mesh_output->edge_of_vertex(v);
+        auto e_next = e_init;
+        do {
+            auto first_edge = e_next;
+            auto last_edge = mesh_output->prev(first_edge);
+            auto curr_edge = last_edge;
+            do {
+                auto e_init_2 = mesh_output->next(curr_edge);
+                auto e_next_2 = e_init_2;
+                do {
+                    // std::cout <<"e1:" << e_next_1 << ", e2:" << e_next_2<<std::endl;
+                    auto v0 = mesh_output->origin(curr_edge);
+                    auto v1 = mesh_output->target(curr_edge);
+                    auto v2 = mesh_output->origin(e_next_2);
+                    auto v3 = mesh_output->target(e_next_2);
+                    auto v0_x = mesh_output->get_PointX(v0);
+                    auto v0_y = mesh_output->get_PointY(v0);
+                    auto v1_x = mesh_output->get_PointX(v1);
+                    auto v1_y = mesh_output->get_PointY(v1);
+                    auto v2_x = mesh_output->get_PointX(v2);
+                    auto v2_y = mesh_output->get_PointY(v2);
+                    auto v3_x = mesh_output->get_PointX(v3);
+                    auto v3_y = mesh_output->get_PointY(v3);
+                    // if (v0 == 166 && v1 == 183 && v2 ==182 && v3 == 165) {
+                    //     std::cout << "HERE" << std::endl;
+                    // }
+                    if (curr_edge == e_next_2 || v3 == v0) {
+                        e_next_2 = mesh_output->next(e_next_2);
+                        continue;
+                    }
+                    if (parallel(curr_edge, e_next_2)) {
+                        if (is_collinear(v0, v1, v3)) {
+                            if (v1 == v2) { // adjacent
+                                if (in_range(v3, v0, v1) || in_range(v0, v2, v3)) {
+                                    // std::cout << "here0"<<std::endl;
+                                    return false;
+                                }
+                            } else {
+                                if (in_range(v2, v0, v1) || in_range(v3, v0, v1) ||
+                                    in_range(v0, v2, v3) || in_range(v1, v2, v3)) {
+                                    return false;
+                                }
+                            }
+                        }
+                    } else { // not parallel
+                        if (v1 != v2 &&  // not adjacent
+                            intersection(curr_edge, e_next_2)) {
+                                // if (v0 == 166 && v1 == 183 && v2 ==182 && v3 == 165) {
+                                // }
+                                return false;
+                            }
+                    }
+                    e_next_2 = mesh_output->next(e_next_2);
+                } while (e_init_2 != e_next_2);
+                curr_edge = mesh_output->next(curr_edge);
+            } while (curr_edge != mesh_output->next(first_edge));
+        e_next = mesh_output->CCW_edge_to_vertex(e_next);
+        } while (e_init != e_next);
+        return true;
+    }
+
+    void optimize_mesh_laplacian(int max_iterations) {
+        double first_movement = -1;
+        for (int i = 0; i < max_iterations; i++) {
+            n_smooth_iterations++;
+            double movement = 0;
+            for(std::size_t v = 0; v < mesh_output->vertices(); v++){
+                // std::cout << "curr: "<< v << ", "<< mesh_output->get_PointX(v) << std::endl;
+                if (mesh_output->is_border_vertex(v) || mesh_output->edge_of_vertex(v) < 0) continue;
+                auto e_init = mesh_output->edge_of_vertex(v);
+                // std::cout << "v"<<v <<std::endl;
+                // std::cout << e_init <<std::endl;
+                auto e_next = e_init;
+                int n = 0;
+                double x = 0;
+                double y = 0;
+                // bool border_present = false;
+                do {
+                    auto v_next = mesh_output->target(e_next);
+                    // if (mesh_output->is_border_vertex(v_next)) border_present = true;
+                    x += mesh_output->get_PointX(v_next) - mesh_output->get_PointX(v);
+                    y += mesh_output->get_PointY(v_next) - mesh_output->get_PointY(v);
+                    n++;
+                    e_next = mesh_output->CCW_edge_to_vertex(e_next);
+                } while (e_next != e_init);
+                auto original_x = mesh_output->get_PointX(v);
+                auto original_y = mesh_output->get_PointY(v);
+                mesh_output->set_PointX(v, mesh_output->get_PointX(v) + x/n);
+                mesh_output->set_PointY(v, mesh_output->get_PointY(v) + y/n);
+                // if (!is_valid_move(v)) {
+                //     mesh_output->set_PointX(v, original_x);
+                //     mesh_output->set_PointY(v, original_y);
+                // }
+                if (first_movement == -1) first_movement = std::abs(x/n) + std::abs(y/n);
+                movement = movement + std::abs(x/n) + std::abs(y/n);
+            }
+            if (std::abs(movement) < first_movement * 0.0001) {
+                break;
+            }
+        }
+    }
+
+    void optimize_mesh_laplacian_constrained(int iterations, std::string measure_type) {
+        Measure* measure;
+        if (measure_type == "laplacian-edge-ratio") {
+            measure = new EdgeRatio(mesh_output, output_seeds);
+        }
+        for (int i = 0; i<iterations; i++) {
+            n_smooth_iterations++;
+            for(std::size_t v = 0; v < mesh_output->vertices(); v++){
+                if (mesh_output->is_border_vertex(v) || mesh_output->edge_of_vertex(v) < 0) continue;
+                auto e_init = mesh_output->edge_of_vertex(v);
+                auto e_next = e_init;
+                int n = 0;
+                double x = 0;
+                double y = 0;
+                do {
+                    auto v_next = mesh_output->target(e_next);
+                    x += mesh_output->get_PointX(v_next) - mesh_output->get_PointX(v);
+                    y += mesh_output->get_PointY(v_next) - mesh_output->get_PointY(v);
+                    n++;
+                    e_next = mesh_output->CCW_edge_to_vertex(e_next);
+                } while (e_next != e_init);
+
+                // original measures
+                double original_x = mesh_output->get_PointX(v);
+                double original_y = mesh_output->get_PointY(v);
+                double original_sum = 0;
+                int adjacent_faces = 0;
+                e_init = mesh_output->edge_of_vertex(v);
+                e_next = e_init;
+                do {
+                    // double face_res = measure(mesh_output, e_next);
+                    double face_res = measure->eval_face(e_next);
+                    adjacent_faces++;
+                    original_sum += face_res;
+                    e_next = mesh_output->CCW_edge_to_vertex(e_next);
+                } while (e_next != e_init);
+                double original_avg = original_sum / adjacent_faces;
+
+                // move vertex
+                mesh_output->set_PointX(v, mesh_output->get_PointX(v) + x/n);
+                mesh_output->set_PointY(v, mesh_output->get_PointY(v) + y/n);
+
+                // new measures
+                double new_sum = 0;
+                e_next = e_init;
+                do {
+                    // double face_res = measure(mesh_output, e_next);
+                    double face_res = measure->eval_face(e_next);
+                    new_sum += face_res;
+                    e_next = mesh_output->CCW_edge_to_vertex(e_next);
+                } while (e_next != e_init);
+                double new_avg = new_sum / adjacent_faces;
+
+                // if worse measure undo move
+                if (measure->is_better(original_avg, new_avg) || !is_valid_move(v)) {
+                    mesh_output->set_PointX(v, original_x);
+                    mesh_output->set_PointY(v, original_y);
+                }
+            }
+        }
+        delete measure;
+    }
     
+    void optimize_mesh_distmesh(int max_iterations, double target_length) {
+        double first_movement = -1;
+        if (target_length == -1) {
+            double sum = 0;
+            for(std::size_t e = 0; e < mesh_output->halfEdges(); e++) {
+                auto target = mesh_output->target(e);
+                auto origin = mesh_output->origin(e);
+                auto x = mesh_output->get_PointX(target) - mesh_output->get_PointX(origin);
+                auto y = mesh_output->get_PointY(target) - mesh_output->get_PointY(origin);
+                auto length = std::sqrt(x*x + y*y);
+                sum += length;
+            }
+            target_length = sum/mesh_output->halfEdges();
+        }
+        // std::cout << target_length << std::endl;
+        for (int i = 0; i < max_iterations; i++) {
+            n_smooth_iterations++;
+            double movement = 0;
+
+            for(std::size_t v = 0; v < mesh_output->vertices(); v++){
+                if (mesh_output->is_border_vertex(v) || mesh_output->edge_of_vertex(v) < 0) continue;
+                auto e_init = mesh_output->edge_of_vertex(v);
+                auto e_next = e_init;
+                double origin_x = mesh_output->get_PointX(v);
+                double origin_y = mesh_output->get_PointY(v);
+                double x = 0;
+                double y = 0;
+                // std::cout << "v: " << v << std::endl;
+                do {
+                    auto v_next = mesh_output->target(e_next);
+                    auto d_x = mesh_output->get_PointX(v_next) - mesh_output->get_PointX(v);
+                    auto d_y = mesh_output->get_PointY(v_next) - mesh_output->get_PointY(v);
+                    double length = std::sqrt(d_x*d_x + d_y*d_y);
+                    if (target_length > length) {
+                        e_next = mesh_output->CCW_edge_to_vertex(e_next);
+                        continue;
+                    }
+                    double force = target_length - length;
+                    double target_x = mesh_output->get_PointX(v_next);
+                    double target_y = mesh_output->get_PointY(v_next);
+                    double direction_x = (target_x - origin_x)/length;
+                    double direction_y = (target_y - origin_y)/length;
+
+                    x += direction_x * -force;
+                    y += direction_y * -force;
+                    // std::cout << target_length << ", " << length << ", " << force << "; " << direction_x * force << ", " << direction_y * force << std::endl;
+
+                    e_next = mesh_output->CCW_edge_to_vertex(e_next);
+                } while (e_next != e_init);
+
+                // std::cout << "e: " << e_next << std::endl;
+                // is_valid_move(e_next);
+                // std::cout << mesh_output->get_PointX(v) <<std::endl;
+                // std::cout << mesh_output->get_PointY(v) <<std::endl;
+                mesh_output->set_PointX(v, mesh_output->get_PointX(v) + x * 0.5);
+                mesh_output->set_PointY(v, mesh_output->get_PointY(v) + y * 0.5);
+                if (!is_valid_move(v)) {
+                    // std::cout << "reversing"<<std::endl;
+                    // std::cout << mesh_output->get_PointX(v) <<std::endl;
+                    // std::cout << mesh_output->get_PointY(v) <<std::endl;
+                    mesh_output->set_PointX(v, origin_x);
+                    mesh_output->set_PointY(v, origin_y);
+                    // std::cout << "reversed"<<std::endl;
+                    // std::cout << mesh_output->get_PointX(v) <<std::endl;
+                    // std::cout << mesh_output->get_PointY(v) <<std::endl;
+                }
+                
+                if (first_movement == -1) first_movement = std::abs(x) + std::abs(y);
+                movement = movement + std::abs(x) + std::abs(y);
+            }
+
+            if (std::abs(movement) < first_movement * 0.0001) {
+                break;
+            }
+        }
+    }
 };
 
 #endif

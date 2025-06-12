@@ -19,11 +19,35 @@ struct ProgramOptions {
     std::string off_file;
     std::string output_name;
     
+    // Polylla options
+    PolyllaOptions polylla_options;
+    
     // Additional flags
-    bool use_gpu = false;
-    bool use_regions = false;
     bool help = false;
 };
+
+bool is_positive_num(const std::string& s) {
+    if (s.empty()) return false;
+    for (char c : s) {
+        if (!isdigit(c)) return false;
+    }
+    return true;
+}
+
+bool validate_polylla_options(const PolyllaOptions& options) {
+    // Business logic validations (not covered by parse_arguments)
+    
+    // Validate target length for distmesh method
+    if (options.smooth_method == "distmesh" && options.target_length == 0) {
+        std::cout << "Error: Target length cannot be zero for distmesh method" << std::endl;
+        return false;
+    }
+    
+    // Could add more business logic validations here in the future
+    // e.g., combination of options that don't make sense together
+    
+    return true;
+}
 
 void print_usage(const char* program_name) {
     std::cout << "Usage: " << program_name << " [OPTIONS] [FILES...]\n\n";
@@ -34,26 +58,31 @@ void print_usage(const char* program_name) {
     std::cout << "Options:\n";
     std::cout << "  -g, --gpu            Enable GPU(CUDA)\n";
     std::cout << "  -r, --region         Read and process triangulation considering regions\n";
+    std::cout << "  -s, --smooth METHOD  Use smoothing method: laplacian, laplacian-edge-ratio, distmesh\n";
+    std::cout << "  -i, --iterations N   Number of smoothing iterations (default: 50)\n";
+    std::cout << "  -t, --target-length N Target edge length for distmesh method\n";
     std::cout << "  -O, --output FORMAT  Specify output format: off (default)\n";
     std::cout << "  -h, --help           Show this help message\n\n";
 }
 
 bool parse_arguments(int argc, char** argv, ProgramOptions& options) {
     static struct option long_options[] = {
-        {"off",     no_argument,       0, 'o'},
-        {"neigh",   no_argument,       0, 'n'},
-        {"ele",     no_argument,       0, 'e'},
-        {"gpu",     no_argument,       0, 'g'},
-        {"region",  no_argument,       0, 'r'},
-        {"output",  required_argument, 0, 'O'},
-        {"help",    no_argument,       0, 'h'},
+        {"off",           no_argument,       0, 'o'},
+        {"neigh",         no_argument,       0, 'n'},
+        {"ele",           no_argument,       0, 'e'},
+        {"region",        no_argument,       0, 'r'},
+        {"smooth",        required_argument, 0, 's'},
+        {"iterations",    required_argument, 0, 'i'},
+        {"target-length", required_argument, 0, 't'},
+        {"output",        required_argument, 0, 'O'},
+        {"help",          no_argument,       0, 'h'},
         {0, 0, 0, 0}
     };
     
     int option_index = 0;
     int c;
     
-    while ((c = getopt_long(argc, argv, "onegrO:h", long_options, &option_index)) != -1) {
+    while ((c = getopt_long(argc, argv, "onres:i:t:O:h", long_options, &option_index)) != -1) {
         switch (c) {
             case 'o':
                 if (options.input_type != ProgramOptions::NONE) {
@@ -79,12 +108,46 @@ bool parse_arguments(int argc, char** argv, ProgramOptions& options) {
                 options.input_type = ProgramOptions::ELE;
                 break;
                 
-            case 'g':
-                options.use_gpu = true;
+            case 'r':
+                options.polylla_options.use_regions = true;
                 break;
                 
-            case 'r':
-                options.use_regions = true;
+            case 's':
+                {
+                    std::string method = optarg;
+                    std::vector<std::string> valid_methods = {"laplacian", "laplacian-edge-ratio", "distmesh"};
+                    if (std::find(valid_methods.begin(), valid_methods.end(), method) != valid_methods.end()) {
+                        options.polylla_options.smooth_method = method;
+                    } else {
+                        std::cout << "Error: Invalid smoothing method '" << method << "'\n";
+                        std::cout << "Valid methods: laplacian, laplacian-edge-ratio, distmesh\n";
+                        return false;
+                    }
+                }
+                break;
+                
+            case 'i':
+                {
+                    std::string iter_str = optarg;
+                    if (is_positive_num(iter_str)) {
+                        options.polylla_options.smooth_iterations = std::stoi(iter_str);
+                    } else {
+                        std::cout << "Error: Invalid value '" << iter_str << "' for iterations. Must be a positive number.\n";
+                        return false;
+                    }
+                }
+                break;
+                
+            case 't':
+                {
+                    std::string length_str = optarg;
+                    if (is_positive_num(length_str) || std::stoi(length_str) == 0) {
+                        options.polylla_options.target_length = std::stod(length_str);
+                    } else {
+                        std::cout << "Error: Invalid value '" << length_str << "' for target-length. Must be a positive number.\n";
+                        return false;
+                    }
+                }
                 break;
                 
             case 'O':
@@ -242,19 +305,28 @@ int main(int argc, char **argv) {
         return 1;
     }
     
-    // Print configuration if GPU or regions are enabled
-    if (options.use_gpu) {
-        std::cout << "GPU acceleration enabled (CUDA)" << std::endl;
+    // Validate Polylla options
+    if (!validate_polylla_options(options.polylla_options)) {
+        return 1;
     }
-    if (options.use_regions) {
+    
+    // Print configuration if regions or smoothing are enabled
+    if (options.polylla_options.use_regions) {
         std::cout << "Region reading and verification enabled" << std::endl;
+    }
+    if (!options.polylla_options.smooth_method.empty()) {
+        std::cout << "Smoothing enabled: " << options.polylla_options.smooth_method 
+                  << " (iterations: " << options.polylla_options.smooth_iterations << ")" << std::endl;
+        if (options.polylla_options.smooth_method == "distmesh" && options.polylla_options.target_length > 0) {
+            std::cout << "Target length: " << options.polylla_options.target_length << std::endl;
+        }
     }
     
     try {
-        // Create mesh based on input type using direct initialization
+        // Create mesh based on input type using new PolyllaOptions
         switch (options.input_type) {
             case ProgramOptions::OFF: {
-                Polylla mesh(options.off_file, options.use_regions);
+                Polylla mesh(options.off_file, options.polylla_options);
                 
                 // Always generate stats
                 mesh.print_stats(options.output_name + ".json");
@@ -271,7 +343,7 @@ int main(int argc, char **argv) {
             }
                 
             case ProgramOptions::NEIGH: {
-                Polylla mesh(options.node_file, options.ele_file, options.neigh_file, options.use_regions);
+                Polylla mesh(options.node_file, options.ele_file, options.neigh_file, options.polylla_options);
                 
                 // Always generate stats
                 mesh.print_stats(options.output_name + ".json");
@@ -288,7 +360,7 @@ int main(int argc, char **argv) {
             }
                 
             case ProgramOptions::ELE: {
-                Polylla mesh(options.node_file, options.ele_file, options.use_regions);
+                Polylla mesh(options.node_file, options.ele_file, options.polylla_options);
                 
                 // Always generate stats
                 mesh.print_stats(options.output_name + ".json");
