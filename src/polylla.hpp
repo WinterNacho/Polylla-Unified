@@ -32,14 +32,13 @@ struct PolyllaOptions {
     double target_length = -1;                // -1 = auto-calculate
 };
 
-double epsilon = 1e-6;
-
 class Polylla
 {
 private:
     typedef std::vector<int> _polygon; 
     typedef std::vector<char> bit_vector; 
 
+    static constexpr double EPSILON = 1e-6;
 
     Triangulation *mesh_input; // Halfedge triangulation
     Triangulation *mesh_output;
@@ -150,6 +149,30 @@ public:
         //seed_edges = bit_vector(mesh_input->halfEdges(), false);
         
         std::cout<<"Creating Polylla..."<<std::endl;
+        
+        // Apply smoothing FIRST, before any polygon generation
+        if (!options.smooth_method.empty()) {
+            auto t_start = std::chrono::high_resolution_clock::now();
+
+            if (options.use_regions) {
+                std::cout << "Smoothing with region boundary preservation enabled" << std::endl;        
+            }
+
+            if (options.smooth_method == "laplacian") {
+                optimize_mesh_laplacian(options.smooth_iterations);
+            }
+            else if (options.smooth_method == "laplacian-edge-ratio") {
+                optimize_mesh_laplacian_constrained(options.smooth_iterations, "laplacian-edge-ratio"); 
+            }
+            else if (options.smooth_method == "distmesh") {
+                optimize_mesh_distmesh(options.smooth_iterations, options.target_length);
+            }
+
+            auto t_end = std::chrono::high_resolution_clock::now();
+            t_smooth = std::chrono::duration<double, std::milli>(t_end-t_start).count();
+            std::string region_info = options.use_regions ? " (preserving region boundaries)" : "";     
+            std::cout<<"Optimized mesh in "<<t_smooth<<" ms using "<<options.smooth_method<<" method"<<region_info<<std::endl;
+        }
         //Label max edges of each triangle
         auto t_start = std::chrono::high_resolution_clock::now();
         for(int i = 0; i < mesh_input->faces(); i++)
@@ -204,24 +227,6 @@ public:
         t_traversal = t_traversal_and_repair - t_repair;
         
         this->m_polygons = output_seeds.size();
-
-        if (!options.smooth_method.empty()) {
-            t_start = std::chrono::high_resolution_clock::now();
-            
-            if (options.smooth_method == "laplacian") {
-                optimize_mesh_laplacian(options.smooth_iterations);
-            }
-            else if (options.smooth_method == "laplacian-edge-ratio") {
-                optimize_mesh_laplacian_constrained(options.smooth_iterations, "laplacian-edge-ratio");
-            }
-            else if (options.smooth_method == "distmesh") {
-                optimize_mesh_distmesh(options.smooth_iterations, options.target_length);
-            }
-            
-            t_end = std::chrono::high_resolution_clock::now();
-            t_smooth = std::chrono::duration<double, std::milli>(t_end-t_start).count();
-            std::cout<<"Optimized mesh in "<<t_smooth<<" ms using "<<options.smooth_method<<" method"<<std::endl;
-        }
 
         // std::cout << mesh_output->get_PointX(508) << ", " << mesh_output->get_PointY(508) << std::endl;
 
@@ -482,13 +487,13 @@ private:
         return false;
     }
 
-    int Equality(double a, double b, double epsilon)
+    int Equality(double a, double b, double eps = EPSILON)
     {
-    return fabs(a - b) < epsilon;
+    return fabs(a - b) < eps;
     }
     
-    int GreaterEqualthan(double a, double b, double epsilon){
-            return Equality(a,b,epsilon) || a > b;
+    int GreaterEqualthan(double a, double b, double eps = EPSILON){
+            return Equality(a,b,eps) || a > b;
     }
 
     //Label max edges of all triangles in the triangulation
@@ -511,28 +516,6 @@ private:
 
     }
 
-/*
-    //Label max edges of all triangles in the triangulation
-    //input: edge e indicent to a triangle t
-    //output: position of edge e in max_edges[e] is labeled as true
-    int label_max_edge(const int e)
-    {
-        double epsion = 0.0000000001f;
-
-        //Calculates the size of each edge of a triangle 
-        double dist0 = mesh_input->distance(e);
-        double dist1 = mesh_input->distance(mesh_input->next(e));
-        double dist2 = mesh_input->distance(mesh_input->prev(e));
-        //Find the longest edge of the triangle
-        if( (GreaterEqualthan(dist0,dist1,epsion) && GreaterEqualthan(dist1,dist2,epsion)) || ( GreaterEqualthan(dist0,dist2,epsion) && GreaterEqualthan(dist2,dist1,epsion)))
-            return e;
-        else if((GreaterEqualthan(dist1,dist0,epsion) && GreaterEqualthan(dist0,dist2,epsion)) || ( GreaterEqualthan(dist1,dist2,epsion) && GreaterEqualthan(dist2,dist0,epsion)))
-            return mesh_input->next(e);
-        else
-            return mesh_input->prev(e);
-        return -1;
-
-    }*/
  
     //Return true if the edge e is the lowest edge both triangles incident to e
     //in case of border edges, they are always labeled as frontier-edge
@@ -813,12 +796,12 @@ private:
         auto v3_x = mesh_output->get_PointX(v3);
         auto v3_y = mesh_output->get_PointY(v3);
         auto den = (v0_x - v1_x)*(v2_y - v3_y) - (v0_y - v1_y)*(v2_x - v3_x);
-        return std::abs(den) < epsilon;
+        return std::abs(den) < EPSILON;
     }
 
     bool is_collinear(int v0, int v1, int v2) {
         double this_area = area(v0, v1, v2);
-        return std::abs(this_area) < epsilon;
+        return std::abs(this_area) < EPSILON;
     }
 
     bool in_range(int p, int v0, int v1) {
@@ -838,6 +821,37 @@ private:
         auto v2 = mesh_output->origin(e2);
         auto v3 = mesh_output->target(e2);
         return is_left(v0, v1, v2) != is_left(v0, v1, v3) && is_left(v2, v3, v0) != is_left(v2, v3, v1);
+    }
+
+    // Check if a vertex is on a region boundary (should not be moved during smoothing)
+    bool is_region_boundary_vertex(int v) {
+        if (!options.use_regions) return false;
+        
+        // A vertex is on a region boundary if any adjacent edge has different region IDs
+        auto e_init = mesh_output->edge_of_vertex(v);
+        if (e_init < 0) return false;
+        
+        auto e_next = e_init;
+        do {
+            auto twin = mesh_output->twin(e_next);
+            if (twin >= 0) {
+                auto face1 = mesh_output->index_face(e_next);
+                auto face2 = mesh_output->index_face(twin);
+
+                // If faces have different regions or one is boundary, vertex is on region boundary     
+                if (face1 >= 0 && face2 >= 0) {
+                    if (mesh_output->region_face(face1) != mesh_output->region_face(face2)) {
+                        return true;
+                    }
+                } else if (face1 < 0 || face2 < 0) {
+                    // Boundary edge - vertex is on boundary
+                    return true;
+                }
+            }
+            e_next = mesh_output->CCW_edge_to_vertex(e_next);
+        } while (e_next != e_init);
+        
+        return false;
     }
 
     bool is_valid_move(int v) {
@@ -909,7 +923,10 @@ private:
             double movement = 0;
             for(std::size_t v = 0; v < mesh_output->vertices(); v++){
                 // std::cout << "curr: "<< v << ", "<< mesh_output->get_PointX(v) << std::endl;
-                if (mesh_output->is_border_vertex(v) || mesh_output->edge_of_vertex(v) < 0) continue;
+                if (mesh_output->is_border_vertex(v) || mesh_output->edge_of_vertex(v) < 0) continue;   
+
+                // If using regions, skip vertices on region boundaries to preserve topology
+                if (options.use_regions && is_region_boundary_vertex(v)) continue;
                 auto e_init = mesh_output->edge_of_vertex(v);
                 // std::cout << "v"<<v <<std::endl;
                 // std::cout << e_init <<std::endl;
@@ -944,14 +961,21 @@ private:
     }
 
     void optimize_mesh_laplacian_constrained(int iterations, std::string measure_type) {
-        Measure* measure;
+        Measure* measure = nullptr;
         if (measure_type == "laplacian-edge-ratio") {
             measure = new EdgeRatio(mesh_output, output_seeds);
+        } else {
+            std::cerr << "Warning: Unknown measure type '" << measure_type << "'. Skipping optimization." << std::endl;
+            return;
         }
+        
         for (int i = 0; i<iterations; i++) {
             n_smooth_iterations++;
             for(std::size_t v = 0; v < mesh_output->vertices(); v++){
-                if (mesh_output->is_border_vertex(v) || mesh_output->edge_of_vertex(v) < 0) continue;
+                if (mesh_output->is_border_vertex(v) || mesh_output->edge_of_vertex(v) < 0) continue;   
+
+                // If using regions, skip vertices on region boundaries to preserve topology
+                if (options.use_regions && is_region_boundary_vertex(v)) continue;
                 auto e_init = mesh_output->edge_of_vertex(v);
                 auto e_next = e_init;
                 int n = 0;
@@ -1027,6 +1051,9 @@ private:
 
             for(std::size_t v = 0; v < mesh_output->vertices(); v++){
                 if (mesh_output->is_border_vertex(v) || mesh_output->edge_of_vertex(v) < 0) continue;
+
+                // If using regions, skip vertices on region boundaries to preserve topology   
+                if (options.use_regions && is_region_boundary_vertex(v)) continue;
                 auto e_init = mesh_output->edge_of_vertex(v);
                 auto e_next = e_init;
                 double origin_x = mesh_output->get_PointX(v);
