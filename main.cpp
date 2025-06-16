@@ -7,6 +7,11 @@
 #include <polylla.hpp>
 #include <triangulation.hpp>
 
+// Conditional CUDA includes
+#ifdef CUDA_AVAILABLE
+#include <GPolylla/gpolylla_wrapper.hpp>
+#endif
+
 struct ProgramOptions {
     enum InputType { NONE, OFF, NEIGH, ELE };
     enum OutputFormat { OFF_FORMAT };
@@ -24,6 +29,7 @@ struct ProgramOptions {
     
     // Additional flags
     bool help = false;
+    bool use_gpu = false;
 };
 
 bool is_positive_num(const std::string& s) {
@@ -56,13 +62,20 @@ void print_usage(const char* program_name) {
     std::cout << "  -n, --neigh          Use .node, .ele, and .neigh files as input\n";
     std::cout << "  -e, --ele            Use .node and .ele files as input (without .neigh)\n\n";
     std::cout << "Options:\n";
-    std::cout << "  -g, --gpu            Enable GPU(CUDA)\n";
+    std::cout << "  -g, --gpu            Enable GPU acceleration (requires CUDA)\n";
     std::cout << "  -r, --region         Read and process triangulation considering regions\n";
     std::cout << "  -s, --smooth METHOD  Use smoothing method: laplacian, laplacian-edge-ratio, distmesh\n";
     std::cout << "  -i, --iterations N   Number of smoothing iterations (default: 50)\n";
     std::cout << "  -t, --target-length N Target edge length for distmesh method\n";
     std::cout << "  -O, --output FORMAT  Specify output format: off (default)\n";
     std::cout << "  -h, --help           Show this help message\n\n";
+    
+    // Show CUDA availability status
+#ifdef CUDA_AVAILABLE
+    std::cout << "CUDA support: Available\n";
+#else
+    std::cout << "CUDA support: Not available (compiled without CUDA)\n";
+#endif
 }
 
 bool parse_arguments(int argc, char** argv, ProgramOptions& options) {
@@ -70,6 +83,7 @@ bool parse_arguments(int argc, char** argv, ProgramOptions& options) {
         {"off",           no_argument,       0, 'o'},
         {"neigh",         no_argument,       0, 'n'},
         {"ele",           no_argument,       0, 'e'},
+        {"gpu",           no_argument,       0, 'g'},
         {"region",        no_argument,       0, 'r'},
         {"smooth",        required_argument, 0, 's'},
         {"iterations",    required_argument, 0, 'i'},
@@ -82,7 +96,7 @@ bool parse_arguments(int argc, char** argv, ProgramOptions& options) {
     int option_index = 0;
     int c;
     
-    while ((c = getopt_long(argc, argv, "onres:i:t:O:h", long_options, &option_index)) != -1) {
+    while ((c = getopt_long(argc, argv, "onegrs:i:t:O:h", long_options, &option_index)) != -1) {
         switch (c) {
             case 'o':
                 if (options.input_type != ProgramOptions::NONE) {
@@ -106,6 +120,10 @@ bool parse_arguments(int argc, char** argv, ProgramOptions& options) {
                     return false;
                 }
                 options.input_type = ProgramOptions::ELE;
+                break;
+                
+            case 'g':
+                options.use_gpu = true;
                 break;
                 
             case 'r':
@@ -288,6 +306,70 @@ bool validate_file_extensions(const ProgramOptions& options) {
     return true;
 }
 
+// Helper function template to execute common mesh operations
+template<typename MeshType>
+void execute_mesh_operations(MeshType& mesh, const ProgramOptions& options) {
+    // Always generate stats
+    mesh.print_stats(options.output_name + ".json");
+    std::cout << "output json in " << options.output_name << ".json" << std::endl;
+    
+    // Generate format-specific output
+    switch (options.output_format) {
+        case ProgramOptions::OFF_FORMAT:
+            mesh.print_OFF(options.output_name + ".off");
+            std::cout << "output off in " << options.output_name << ".off" << std::endl;
+            break;
+    }
+}
+
+// Helper function for OFF file processing
+void process_off_file(const ProgramOptions& options) {
+#ifdef CUDA_AVAILABLE
+    if (options.use_gpu) {
+        // Use GPU version (temporarily with bool parameter, will be updated in Phase 3)
+        GPolylla mesh(options.off_file, options.polylla_options.use_regions);
+        execute_mesh_operations(mesh, options);
+    } else {
+#endif
+        // Use CPU version
+        Polylla mesh(options.off_file, options.polylla_options);
+        execute_mesh_operations(mesh, options);
+#ifdef CUDA_AVAILABLE
+    }
+#endif
+}
+
+// Helper function for NEIGH file processing
+void process_neigh_files(const ProgramOptions& options) {
+#ifdef CUDA_AVAILABLE
+    if (options.use_gpu) {
+        // Use GPU version (temporarily with bool parameter, will be updated in Phase 3)
+        GPolylla mesh(options.node_file, options.ele_file, options.neigh_file, options.polylla_options.use_regions);
+        execute_mesh_operations(mesh, options);
+    } else {
+#endif
+        // Use CPU version
+        Polylla mesh(options.node_file, options.ele_file, options.neigh_file, options.polylla_options);
+        execute_mesh_operations(mesh, options);
+#ifdef CUDA_AVAILABLE
+    }
+#endif
+}
+
+// Helper function for ELE file processing (CPU only)
+void process_ele_files(const ProgramOptions& options) {
+#ifdef CUDA_AVAILABLE
+    if (options.use_gpu) {
+        std::cout << "Error: GPU version does not support --ele mode (only --off and --neigh)" << std::endl;
+        std::cout << "Use CPU version (remove --gpu flag) or use --neigh mode instead" << std::endl;
+        throw std::runtime_error("GPU mode not supported for --ele");
+    }
+#endif
+    // Use CPU version (ELE mode only supported in CPU)
+    Polylla mesh(options.node_file, options.ele_file, options.polylla_options);
+    execute_mesh_operations(mesh, options);
+}
+
 int main(int argc, char **argv) {
     ProgramOptions options;
     
@@ -303,6 +385,17 @@ int main(int argc, char **argv) {
     
     if (!validate_file_extensions(options)) {
         return 1;
+    }
+    
+    // Validate GPU flag
+    if (options.use_gpu) {
+#ifndef CUDA_AVAILABLE
+        std::cout << "Error: GPU acceleration requested but CUDA support not available (compiled without CUDA)" << std::endl;
+        std::cout << "Please rebuild with CUDA or remove --gpu flag" << std::endl;
+        return 1;
+#else
+        std::cout << "GPU acceleration enabled" << std::endl;
+#endif
     }
     
     // Validate Polylla options
@@ -323,58 +416,19 @@ int main(int argc, char **argv) {
     }
     
     try {
-        // Create mesh based on input type using new PolyllaOptions
+        // Process mesh based on input type and GPU selection
         switch (options.input_type) {
-            case ProgramOptions::OFF: {
-                Polylla mesh(options.off_file, options.polylla_options);
-                
-                // Always generate stats
-                mesh.print_stats(options.output_name + ".json");
-                std::cout << "output json in " << options.output_name << ".json" << std::endl;
-                
-                // Generate format-specific output
-                switch (options.output_format) {
-                    case ProgramOptions::OFF_FORMAT:
-                        mesh.print_OFF(options.output_name + ".off");
-                        std::cout << "output off in " << options.output_name << ".off" << std::endl;
-                        break;
-                }
+            case ProgramOptions::OFF:
+                process_off_file(options);
                 break;
-            }
                 
-            case ProgramOptions::NEIGH: {
-                Polylla mesh(options.node_file, options.ele_file, options.neigh_file, options.polylla_options);
-                
-                // Always generate stats
-                mesh.print_stats(options.output_name + ".json");
-                std::cout << "output json in " << options.output_name << ".json" << std::endl;
-                
-                // Generate format-specific output
-                switch (options.output_format) {
-                    case ProgramOptions::OFF_FORMAT:
-                        mesh.print_OFF(options.output_name + ".off");
-                        std::cout << "output off in " << options.output_name << ".off" << std::endl;
-                        break;
-                }
+            case ProgramOptions::NEIGH:
+                process_neigh_files(options);
                 break;
-            }
                 
-            case ProgramOptions::ELE: {
-                Polylla mesh(options.node_file, options.ele_file, options.polylla_options);
-                
-                // Always generate stats
-                mesh.print_stats(options.output_name + ".json");
-                std::cout << "output json in " << options.output_name << ".json" << std::endl;
-                
-                // Generate format-specific output
-                switch (options.output_format) {
-                    case ProgramOptions::OFF_FORMAT:
-                        mesh.print_OFF(options.output_name + ".off");
-                        std::cout << "output off in " << options.output_name << ".off" << std::endl;
-                        break;
-                }
+            case ProgramOptions::ELE:
+                process_ele_files(options);
                 break;
-            }
                 
             default:
                 std::cout << "Error: No valid input type specified" << std::endl;
