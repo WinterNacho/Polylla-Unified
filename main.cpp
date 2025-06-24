@@ -40,12 +40,18 @@ bool is_positive_num(const std::string& s) {
     return true;
 }
 
+// Helper function to validate file existence
+bool file_exists(const std::string& filename) {
+    std::ifstream file(filename);
+    return file.good();
+}
+
 bool validate_polylla_options(const PolyllaOptions& options) {
     // Business logic validations (not covered by parse_arguments)
     
     // Validate target length for distmesh method
     if (options.smooth_method == "distmesh" && options.target_length == 0) {
-        std::cout << "Error: Target length cannot be zero for distmesh method" << std::endl;
+        std::cerr << "Error: Target length cannot be zero for distmesh method" << std::endl;
         return false;
     }
     
@@ -100,7 +106,7 @@ bool parse_arguments(int argc, char** argv, ProgramOptions& options) {
         switch (c) {
             case 'o':
                 if (options.input_type != ProgramOptions::NONE) {
-                    std::cout << "Error: Multiple input types specified\n";
+                    std::cerr << "Error: Multiple input types specified\n";
                     return false;
                 }
                 options.input_type = ProgramOptions::OFF;
@@ -108,7 +114,7 @@ bool parse_arguments(int argc, char** argv, ProgramOptions& options) {
                 
             case 'n':
                 if (options.input_type != ProgramOptions::NONE) {
-                    std::cout << "Error: Multiple input types specified\n";
+                    std::cerr << "Error: Multiple input types specified\n";
                     return false;
                 }
                 options.input_type = ProgramOptions::NEIGH;
@@ -116,7 +122,7 @@ bool parse_arguments(int argc, char** argv, ProgramOptions& options) {
                 
             case 'e':
                 if (options.input_type != ProgramOptions::NONE) {
-                    std::cout << "Error: Multiple input types specified\n";
+                    std::cerr << "Error: Multiple input types specified\n";
                     return false;
                 }
                 options.input_type = ProgramOptions::ELE;
@@ -137,8 +143,8 @@ bool parse_arguments(int argc, char** argv, ProgramOptions& options) {
                     if (std::find(valid_methods.begin(), valid_methods.end(), method) != valid_methods.end()) {
                         options.polylla_options.smooth_method = method;
                     } else {
-                        std::cout << "Error: Invalid smoothing method '" << method << "'\n";
-                        std::cout << "Valid methods: laplacian, laplacian-edge-ratio, distmesh\n";
+                        std::cerr << "Error: Invalid smoothing method '" << method << "'\n";
+                        std::cerr << "Valid methods: laplacian, laplacian-edge-ratio, distmesh\n";
                         return false;
                     }
                 }
@@ -150,7 +156,7 @@ bool parse_arguments(int argc, char** argv, ProgramOptions& options) {
                     if (is_positive_num(iter_str)) {
                         options.polylla_options.smooth_iterations = std::stoi(iter_str);
                     } else {
-                        std::cout << "Error: Invalid value '" << iter_str << "' for iterations. Must be a positive number.\n";
+                        std::cerr << "Error: Invalid value '" << iter_str << "' for iterations. Must be a positive number.\n";
                         return false;
                     }
                 }
@@ -162,7 +168,7 @@ bool parse_arguments(int argc, char** argv, ProgramOptions& options) {
                     if (is_positive_num(length_str) || std::stoi(length_str) == 0) {
                         options.polylla_options.target_length = std::stod(length_str);
                     } else {
-                        std::cout << "Error: Invalid value '" << length_str << "' for target-length. Must be a positive number.\n";
+                        std::cerr << "Error: Invalid value '" << length_str << "' for target-length. Must be a positive number.\n";
                         return false;
                     }
                 }
@@ -174,7 +180,7 @@ bool parse_arguments(int argc, char** argv, ProgramOptions& options) {
                     if (format == "off") {
                         options.output_format = ProgramOptions::OFF_FORMAT;
                     } else {
-                        std::cout << "Error: Unknown output format '" << format << "'. Supported: off" << std::endl;
+                        std::cerr << "Error: Unknown output format '" << format << "'. Supported: off" << std::endl;
                         return false;
                     }
                 }
@@ -201,7 +207,7 @@ bool parse_arguments(int argc, char** argv, ProgramOptions& options) {
     
     // If no input type specified, we need one
     if (options.input_type == ProgramOptions::NONE) {
-        std::cout << "Error: No input type specified. Use --help for usage information.\n";
+        std::cerr << "Error: No input type specified. Use --help for usage information.\n";
         return false;
     }
     
@@ -212,7 +218,7 @@ bool parse_arguments(int argc, char** argv, ProgramOptions& options) {
                 return file.substr(file.find_last_of(".") + 1) == "off"; 
             });
         if (off_file == remaining_args.end()) {
-            std::cout << "Error: No .off file found in arguments\n";
+            std::cerr << "Error: No .off file found in arguments\n";
             return false;
         }
         options.off_file = *off_file;
@@ -238,7 +244,7 @@ bool parse_arguments(int argc, char** argv, ProgramOptions& options) {
             });
             
         if (node_file == remaining_args.end() || ele_file == remaining_args.end() || neigh_file == remaining_args.end()) {
-            std::cout << "Error: Missing required files (.node, .ele, .neigh)\n";
+            std::cerr << "Error: Missing required files (.node, .ele, .neigh)\n";
             return false;
         }
         
@@ -264,7 +270,7 @@ bool parse_arguments(int argc, char** argv, ProgramOptions& options) {
             });
             
         if (node_file == remaining_args.end() || ele_file == remaining_args.end()) {
-            std::cout << "Error: Missing required files (.node, .ele)\n";
+            std::cerr << "Error: Missing required files (.node, .ele)\n";
             return false;
         }
         
@@ -282,23 +288,41 @@ bool parse_arguments(int argc, char** argv, ProgramOptions& options) {
 }
 
 bool validate_file_extensions(const ProgramOptions& options) {
+    // File existence and extension validation
+    
     if (options.input_type == ProgramOptions::OFF) {
+        if (!file_exists(options.off_file)) {
+            std::cerr << "Error: File '" << options.off_file << "' does not exist" << std::endl;
+            return false;
+        }
         if (options.off_file.substr(options.off_file.find_last_of(".") + 1) != "off") {
-            std::cout << "Error: OFF file must have .off extension" << std::endl;
+            std::cerr << "Error: OFF file must have .off extension" << std::endl;
             return false;
         }
     } else if (options.input_type == ProgramOptions::NEIGH || options.input_type == ProgramOptions::ELE) {
+        if (!file_exists(options.node_file)) {
+            std::cerr << "Error: File '" << options.node_file << "' does not exist" << std::endl;
+            return false;
+        }
+        if (!file_exists(options.ele_file)) {
+            std::cerr << "Error: File '" << options.ele_file << "' does not exist" << std::endl;
+            return false;
+        }
         if (options.node_file.substr(options.node_file.find_last_of(".") + 1) != "node") {
-            std::cout << "Error: node file must have .node extension" << std::endl;
+            std::cerr << "Error: node file must have .node extension" << std::endl;
             return false;
         }
         if (options.ele_file.substr(options.ele_file.find_last_of(".") + 1) != "ele") {
-            std::cout << "Error: ele file must have .ele extension" << std::endl;
+            std::cerr << "Error: ele file must have .ele extension" << std::endl;
             return false;
         }
         if (options.input_type == ProgramOptions::NEIGH) {
+            if (!file_exists(options.neigh_file)) {
+                std::cerr << "Error: File '" << options.neigh_file << "' does not exist" << std::endl;
+                return false;
+            }
             if (options.neigh_file.substr(options.neigh_file.find_last_of(".") + 1) != "neigh") {
-                std::cout << "Error: neigh file must have .neigh extension" << std::endl;
+                std::cerr << "Error: neigh file must have .neigh extension" << std::endl;
                 return false;
             }
         }
@@ -360,8 +384,8 @@ void process_neigh_files(const ProgramOptions& options) {
 void process_ele_files(const ProgramOptions& options) {
 #ifdef CUDA_AVAILABLE
     if (options.use_gpu) {
-        std::cout << "Error: GPU version does not support --ele mode (only --off and --neigh)" << std::endl;
-        std::cout << "Use CPU version (remove --gpu flag) or use --neigh mode instead" << std::endl;
+        std::cerr << "Error: GPU version does not support --ele mode (only --off and --neigh)" << std::endl;
+        std::cerr << "Use CPU version (remove --gpu flag) or use --neigh mode instead" << std::endl;
         throw std::runtime_error("GPU mode not supported for --ele");
     }
 #endif
@@ -390,8 +414,8 @@ int main(int argc, char **argv) {
     // Validate GPU flag
     if (options.use_gpu) {
 #ifndef CUDA_AVAILABLE
-        std::cout << "Error: GPU acceleration requested but CUDA support not available (compiled without CUDA)" << std::endl;
-        std::cout << "Please rebuild with CUDA or remove --gpu flag" << std::endl;
+        std::cerr << "Error: GPU acceleration requested but CUDA support not available (compiled without CUDA)" << std::endl;
+        std::cerr << "Please rebuild with CUDA or remove --gpu flag" << std::endl;
         return 1;
 #else
         std::cout << "GPU acceleration enabled" << std::endl;
@@ -431,7 +455,7 @@ int main(int argc, char **argv) {
                 break;
                 
             default:
-                std::cout << "Error: No valid input type specified" << std::endl;
+                std::cerr << "Error: No valid input type specified" << std::endl;
                 return 1;
         }
         
@@ -439,7 +463,7 @@ int main(int argc, char **argv) {
         // mesh.print_ALE(options.output_name + ".ale");
         // std::cout << "output ale in " << options.output_name << ".ale" << std::endl;
     } catch (const std::exception& e) {
-        std::cout << "Error: " << e.what() << std::endl;
+        std::cerr << "Error: " << e.what() << std::endl;
         return 1;
     }
     

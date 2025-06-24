@@ -36,8 +36,11 @@ Input modes:
   -e, --ele            Use .node and .ele files as input (without .neigh)
 
 Options:
-  -g, --gpu            Enable GPU(CUDA)
+  -g, --gpu            Enable GPU acceleration (requires CUDA)
   -r, --region         Read and process triangulation considering regions
+  -s, --smooth METHOD  Use smoothing method: laplacian, laplacian-edge-ratio, distmesh
+  -i, --iterations N   Number of smoothing iterations (default: 50)
+  -t, --target-length N Target edge length for distmesh method
   -O, --output FORMAT  Specify output format: off (default)
   -h, --help           Show this help message
 ```
@@ -85,6 +88,40 @@ Enable GPU acceleration:
 ```bash
 ./Polylla --off --gpu input.off
 ```
+
+Apply mesh smoothing:
+
+```bash
+# Laplacian smoothing with 100 iterations
+./Polylla --off --smooth laplacian --iterations 100 input.off
+
+# Edge-ratio constrained smoothing
+./Polylla --off --smooth laplacian-edge-ratio --iterations 50 input.off
+
+# DistMesh-style smoothing with target edge length
+./Polylla --off --smooth distmesh --target-length 0.1 --iterations 75 input.off
+```
+
+Combine options:
+
+```bash
+# Use regions with GPU and smoothing
+./Polylla --neigh --region --gpu --smooth laplacian --iterations 50 mesh.node mesh.ele mesh.neigh
+```
+
+### Smoothing Methods
+
+The algorithm supports three mesh smoothing methods that can be applied before polygon generation:
+
+- **laplacian**: Classic Laplacian smoothing for vertex positions
+- **laplacian-edge-ratio**: Laplacian smoothing with edge ratio constraints to preserve mesh quality
+- **distmesh**: DistMesh-style smoothing with target edge length control
+
+**Notes:**
+
+- Smoothing is applied **before** polygon generation to improve the quality of the input triangulation
+- When `--region` is enabled, smoothing preserves region boundaries
+- For `distmesh` method, use `--target-length` to specify desired edge length (auto-calculated if not provided)
 
 ### Output files
 
