@@ -67,6 +67,12 @@ void print_usage(const char* program_name) {
     std::cout << "  -o, --off            Use OFF file as input\n";
     std::cout << "  -n, --neigh          Use .node, .ele, and .neigh files as input\n";
     std::cout << "  -e, --ele            Use .node and .ele files as input (without .neigh)\n\n";
+    
+    std::cout << "File specification:\n";
+    std::cout << "  You can specify files in two ways:\n";
+    std::cout << "  1. Individual files: program -n file.node file.ele file.neigh\n";
+    std::cout << "  2. Base name: program -n basename (automatically uses basename.node, basename.ele, basename.neigh)\n\n";
+    
     std::cout << "Options:\n";
     std::cout << "  -g, --gpu            Enable GPU acceleration (requires CUDA)\n";
     std::cout << "  -r, --region         Read and process triangulation considering regions\n";
@@ -213,15 +219,27 @@ bool parse_arguments(int argc, char** argv, ProgramOptions& options) {
     
     // Process input files based on type
     if (options.input_type == ProgramOptions::OFF) {
+        // Look for .off file first (existing behavior)
         auto off_file = std::find_if(remaining_args.begin(), remaining_args.end(), 
             [](const std::string& file) { 
                 return file.substr(file.find_last_of(".") + 1) == "off"; 
             });
-        if (off_file == remaining_args.end()) {
+        
+        if (off_file != remaining_args.end()) {
+            // Found explicit .off file
+            options.off_file = *off_file;
+        } else if (remaining_args.size() == 1) {
+            // Single argument - treat as base name
+            std::string base = remaining_args[0];
+            // Only remove known extensions (.off) to get clean base name
+            if (base.length() > 4 && base.substr(base.length() - 4) == ".off") {
+                base = base.substr(0, base.length() - 4);
+            }
+            options.off_file = base + ".off";
+        } else {
             std::cerr << "Error: No .off file found in arguments\n";
             return false;
         }
-        options.off_file = *off_file;
         
         // Auto-generate output name if not provided
         if (options.output_name.empty()) {
@@ -229,7 +247,7 @@ bool parse_arguments(int argc, char** argv, ProgramOptions& options) {
         }
         
     } else if (options.input_type == ProgramOptions::NEIGH) {
-        // Find required files
+        // Look for explicit files first (existing behavior)
         auto node_file = std::find_if(remaining_args.begin(), remaining_args.end(), 
             [](const std::string& file) { 
                 return file.substr(file.find_last_of(".") + 1) == "node"; 
@@ -243,14 +261,29 @@ bool parse_arguments(int argc, char** argv, ProgramOptions& options) {
                 return file.substr(file.find_last_of(".") + 1) == "neigh"; 
             });
             
-        if (node_file == remaining_args.end() || ele_file == remaining_args.end() || neigh_file == remaining_args.end()) {
-            std::cerr << "Error: Missing required files (.node, .ele, .neigh)\n";
+        if (node_file != remaining_args.end() && ele_file != remaining_args.end() && neigh_file != remaining_args.end()) {
+            // Found all explicit files
+            options.node_file = *node_file;
+            options.ele_file = *ele_file;
+            options.neigh_file = *neigh_file;
+        } else if (remaining_args.size() == 1) {
+            // Single argument - treat as base name
+            std::string base = remaining_args[0];
+            // Only remove known extensions (.node, .ele, .neigh) to get clean base name
+            if (base.length() > 5 && base.substr(base.length() - 5) == ".node") {
+                base = base.substr(0, base.length() - 5);
+            } else if (base.length() > 4 && base.substr(base.length() - 4) == ".ele") {
+                base = base.substr(0, base.length() - 4);
+            } else if (base.length() > 6 && base.substr(base.length() - 6) == ".neigh") {
+                base = base.substr(0, base.length() - 6);
+            }
+            options.node_file = base + ".node";
+            options.ele_file = base + ".ele";
+            options.neigh_file = base + ".neigh";
+        } else {
+            std::cerr << "Error: Missing required files (.node, .ele, .neigh) or provide single base name\n";
             return false;
         }
-        
-        options.node_file = *node_file;
-        options.ele_file = *ele_file;
-        options.neigh_file = *neigh_file;
         
         // Auto-generate output name if not provided
         if (options.output_name.empty()) {
@@ -259,7 +292,7 @@ bool parse_arguments(int argc, char** argv, ProgramOptions& options) {
         }
         
     } else if (options.input_type == ProgramOptions::ELE) {
-        // Similar logic for ELE type
+        // Look for explicit files first (existing behavior)
         auto node_file = std::find_if(remaining_args.begin(), remaining_args.end(), 
             [](const std::string& file) { 
                 return file.substr(file.find_last_of(".") + 1) == "node"; 
@@ -269,13 +302,25 @@ bool parse_arguments(int argc, char** argv, ProgramOptions& options) {
                 return file.substr(file.find_last_of(".") + 1) == "ele"; 
             });
             
-        if (node_file == remaining_args.end() || ele_file == remaining_args.end()) {
-            std::cerr << "Error: Missing required files (.node, .ele)\n";
+        if (node_file != remaining_args.end() && ele_file != remaining_args.end()) {
+            // Found explicit files
+            options.node_file = *node_file;
+            options.ele_file = *ele_file;
+        } else if (remaining_args.size() == 1) {
+            // Single argument - treat as base name
+            std::string base = remaining_args[0];
+            // Only remove known extensions (.node, .ele) to get clean base name
+            if (base.length() > 5 && base.substr(base.length() - 5) == ".node") {
+                base = base.substr(0, base.length() - 5);
+            } else if (base.length() > 4 && base.substr(base.length() - 4) == ".ele") {
+                base = base.substr(0, base.length() - 4);
+            }
+            options.node_file = base + ".node";
+            options.ele_file = base + ".ele";
+        } else {
+            std::cerr << "Error: Missing required files (.node, .ele) or provide single base name\n";
             return false;
         }
-        
-        options.node_file = *node_file;
-        options.ele_file = *ele_file;
         
         // Auto-generate output name if not provided
         if (options.output_name.empty()) {
