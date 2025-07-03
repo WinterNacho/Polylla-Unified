@@ -17,10 +17,10 @@ else()
 endif()
 
 # Add subdirectories
+add_subdirectory(external)
+include_directories(external)
 if(CUDA_AVAILABLE)
-    # Include external libraries only when CUDA is available
-    add_subdirectory(external)
-    include_directories(external)
+    # Set malloc_count properties only when CUDA is available
     set_target_properties(malloccountfiles PROPERTIES LINKER_LANGUAGE C)
 endif()
 
@@ -38,6 +38,9 @@ endif()
 
 # Create the main executable (using main.cpp - will be updated in Phase 2)
 add_executable(Polylla main.cpp)
+
+# Make Polylla depend on triangle being built first
+add_dependencies(Polylla triangle)
 
 # Link libraries
 target_link_libraries(Polylla PUBLIC meshfiles)

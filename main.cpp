@@ -13,7 +13,7 @@
 #endif
 
 struct ProgramOptions {
-    enum InputType { NONE, OFF, NEIGH, ELE };
+    enum InputType { NONE, OFF, NEIGH, ELE, POLY };
     enum OutputFormat { OFF_FORMAT };
     
     InputType input_type = NONE;
@@ -22,6 +22,8 @@ struct ProgramOptions {
     std::string ele_file;
     std::string neigh_file;
     std::string off_file;
+    std::string poly_file;
+    std::string triangle_args = "pnz";  // Default triangle arguments
     std::string output_name;
     
     // Polylla options
@@ -66,12 +68,23 @@ void print_usage(const char* program_name) {
     std::cout << "Input modes:\n";
     std::cout << "  -o, --off            Use OFF file as input\n";
     std::cout << "  -n, --neigh          Use .node, .ele, and .neigh files as input\n";
-    std::cout << "  -e, --ele            Use .node and .ele files as input (without .neigh)\n\n";
+    std::cout << "  -e, --ele            Use .node and .ele files as input (without .neigh)\n";
+    std::cout << "  -p, --poly           Use .poly file as input (requires Triangle)\n";
+    std::cout << "  -p:ARGS              Use .poly file with custom Triangle arguments\n\n";
     
     std::cout << "File specification:\n";
     std::cout << "  You can specify files in two ways:\n";
     std::cout << "  1. Individual files: program -n file.node file.ele file.neigh\n";
     std::cout << "  2. Base name: program -n basename (automatically uses basename.node, basename.ele, basename.neigh)\n\n";
+    
+    std::cout << "Triangle integration (.poly files):\n";
+    std::cout << "  Basic usage:\n";
+    std::cout << "    " << program_name << " -p input.poly                    # Uses 'triangle -pnz'\n";
+    std::cout << "    " << program_name << " -p input.poly --region           # Uses 'triangle -pnzAa'\n";
+    std::cout << "  Custom Triangle arguments:\n";
+    std::cout << "    " << program_name << " -p:pqnz input.poly               # Uses 'triangle -pqnz'\n";
+    std::cout << "    " << program_name << " -p:pq30a0.1nzAa input.poly       # Quality 30°, max area 0.1\n";
+    std::cout << "    " << program_name << " -p:pq25nzAa input.poly --region  # Quality 25° with regions\n\n";
     
     std::cout << "Options:\n";
     std::cout << "  -g, --gpu            Enable GPU acceleration (requires CUDA)\n";
@@ -91,10 +104,32 @@ void print_usage(const char* program_name) {
 }
 
 bool parse_arguments(int argc, char** argv, ProgramOptions& options) {
+    // First pass: check for -p:args format before using getopt
+    for (int i = 1; i < argc; i++) {
+        std::string arg = argv[i];
+        if (arg.substr(0, 3) == "-p:") {
+            // Found -p:args format
+            if (options.input_type != ProgramOptions::NONE) {
+                std::cerr << "Error: Multiple input types specified\n";
+                return false;
+            }
+            options.input_type = ProgramOptions::POLY;
+            options.triangle_args = arg.substr(3);  // Extract arguments after -p:
+            
+            // Remove this argument from argv for getopt processing
+            for (int j = i; j < argc - 1; j++) {
+                argv[j] = argv[j + 1];
+            }
+            argc--;
+            i--; // Adjust index since we removed an element
+        }
+    }
+    
     static struct option long_options[] = {
         {"off",           no_argument,       0, 'o'},
         {"neigh",         no_argument,       0, 'n'},
         {"ele",           no_argument,       0, 'e'},
+        {"poly",          no_argument,       0, 'p'},
         {"gpu",           no_argument,       0, 'g'},
         {"region",        no_argument,       0, 'r'},
         {"smooth",        required_argument, 0, 's'},
@@ -108,7 +143,7 @@ bool parse_arguments(int argc, char** argv, ProgramOptions& options) {
     int option_index = 0;
     int c;
     
-    while ((c = getopt_long(argc, argv, "onegrs:i:t:O:h", long_options, &option_index)) != -1) {
+    while ((c = getopt_long(argc, argv, "onegprs:i:t:O:h", long_options, &option_index)) != -1) {
         switch (c) {
             case 'o':
                 if (options.input_type != ProgramOptions::NONE) {
@@ -132,6 +167,14 @@ bool parse_arguments(int argc, char** argv, ProgramOptions& options) {
                     return false;
                 }
                 options.input_type = ProgramOptions::ELE;
+                break;
+                
+            case 'p':
+                if (options.input_type != ProgramOptions::NONE) {
+                    std::cerr << "Error: Multiple input types specified\n";
+                    return false;
+                }
+                options.input_type = ProgramOptions::POLY;
                 break;
                 
             case 'g':
@@ -327,6 +370,12 @@ bool parse_arguments(int argc, char** argv, ProgramOptions& options) {
             std::string base = options.node_file.substr(0, options.node_file.find_last_of("."));
             options.output_name = base;
         }
+    } else if (options.input_type == ProgramOptions::POLY) {
+        if (remaining_args.size() != 1) {
+            std::cerr << "Error: Exactly one .poly file must be specified\n";
+            return false;
+        }
+        options.poly_file = remaining_args[0];
     }
     
     return true;
@@ -370,6 +419,11 @@ bool validate_file_extensions(const ProgramOptions& options) {
                 std::cerr << "Error: neigh file must have .neigh extension" << std::endl;
                 return false;
             }
+        }
+    } else if (options.input_type == ProgramOptions::POLY) {
+        if (!file_exists(options.poly_file)) {
+            std::cerr << "Error: File '" << options.poly_file << "' does not exist" << std::endl;
+            return false;
         }
     }
     return true;
@@ -439,6 +493,78 @@ void process_ele_files(const ProgramOptions& options) {
     execute_mesh_operations(mesh, options);
 }
 
+// Helper function for POLY file processing
+void process_poly_file(const ProgramOptions& options) {
+    // Determine triangle arguments based on region flag
+    std::string triangle_args = options.triangle_args;
+    if (options.polylla_options.use_regions && triangle_args == "pnz") {
+        // Auto-upgrade to include region attributes when --region is used
+        triangle_args = "pnzAa";
+        std::cout << "Region mode enabled: using triangle arguments 'pnzAa'" << std::endl;
+    }
+    
+    // Get base name for output files
+    std::string base = options.poly_file;
+    if (base.length() > 5 && base.substr(base.length() - 5) == ".poly") {
+        base = base.substr(0, base.length() - 5);
+    }
+    
+    // Construct triangle command (Unix)
+    std::string triangle_path = "./bin/triangle";
+    std::string triangle_cmd = triangle_path + " -" + triangle_args + " " + options.poly_file;
+    
+    // Visual separation before Triangle execution
+    std::cout << "\n" << std::string(80, '=') << std::endl;
+    std::cout << "                          TRIANGLE EXECUTION" << std::endl;
+    std::cout << std::string(80, '=') << std::endl;
+    std::cout << "Executing: " << triangle_cmd << std::endl;
+    std::cout << std::string(80, '-') << std::endl;
+    
+    // Execute triangle
+    int result = system(triangle_cmd.c_str());
+    
+    // Visual separation after Triangle execution
+    std::cout << std::string(80, '-') << std::endl;
+    if (result != 0) {
+        std::cout << "Triangle execution FAILED with code " << result << std::endl;
+        std::cout << std::string(80, '=') << std::endl;
+        throw std::runtime_error("Triangle execution failed with code " + std::to_string(result));
+    } else {
+        std::cout << "Triangle execution completed successfully!" << std::endl;
+    }
+    std::cout << std::string(80, '=') << std::endl;
+    std::cout << "                          POLYLLA PROCESSING" << std::endl;
+    std::cout << std::string(80, '=') << std::endl;
+    
+    // Set up file paths for generated files (triangle outputs with .1 suffix)
+    ProgramOptions modified_options = options;
+    modified_options.input_type = ProgramOptions::NEIGH;
+    modified_options.node_file = base + ".1.node";
+    modified_options.ele_file = base + ".1.ele";
+    modified_options.neigh_file = base + ".1.neigh";
+    
+    // Auto-generate output name if not provided
+    if (modified_options.output_name.empty()) {
+        modified_options.output_name = base;
+    }
+    
+    // Verify triangle generated the expected files
+    if (!file_exists(modified_options.node_file)) {
+        throw std::runtime_error("Triangle did not generate expected .node file: " + modified_options.node_file);
+    }
+    if (!file_exists(modified_options.ele_file)) {
+        throw std::runtime_error("Triangle did not generate expected .ele file: " + modified_options.ele_file);
+    }
+    if (!file_exists(modified_options.neigh_file)) {
+        throw std::runtime_error("Triangle did not generate expected .neigh file: " + modified_options.neigh_file);
+    }
+    
+    std::cout << "Triangle completed successfully. Processing with Polylla..." << std::endl;
+    
+    // Process with Polylla using the generated files
+    process_neigh_files(modified_options);
+}
+
 int main(int argc, char **argv) {
     ProgramOptions options;
     
@@ -497,6 +623,10 @@ int main(int argc, char **argv) {
                 
             case ProgramOptions::ELE:
                 process_ele_files(options);
+                break;
+                
+            case ProgramOptions::POLY:
+                process_poly_file(options);
                 break;
                 
             default:
