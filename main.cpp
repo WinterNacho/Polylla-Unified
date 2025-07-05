@@ -6,6 +6,7 @@
 #include <getopt.h>
 #include <polylla.hpp>
 #include <triangulation.hpp>
+#include <filesystem>
 
 // Conditional CUDA includes
 #ifdef CUDA_AVAILABLE
@@ -286,7 +287,8 @@ bool parse_arguments(int argc, char** argv, ProgramOptions& options) {
         
         // Auto-generate output name if not provided
         if (options.output_name.empty()) {
-            options.output_name = options.off_file.substr(0, options.off_file.find_last_of("."));
+            std::string base = options.off_file.substr(0, options.off_file.find_last_of("."));
+            options.output_name = base + "_polylla";
         }
         
     } else if (options.input_type == ProgramOptions::NEIGH) {
@@ -328,7 +330,7 @@ bool parse_arguments(int argc, char** argv, ProgramOptions& options) {
             return false;
         }
         
-        // Auto-generate output name if not provided
+        // Auto-generate output name if not provided (solo OFF lleva sufijo _polylla)
         if (options.output_name.empty()) {
             std::string base = options.node_file.substr(0, options.node_file.find_last_of("."));
             options.output_name = base;
@@ -365,7 +367,7 @@ bool parse_arguments(int argc, char** argv, ProgramOptions& options) {
             return false;
         }
         
-        // Auto-generate output name if not provided
+        // Auto-generate output name if not provided (solo OFF lleva sufijo _polylla)
         if (options.output_name.empty()) {
             std::string base = options.node_file.substr(0, options.node_file.find_last_of("."));
             options.output_name = base;
@@ -493,6 +495,19 @@ void process_ele_files(const ProgramOptions& options) {
     execute_mesh_operations(mesh, options);
 }
 
+// Helper function to get triangle executable path relative to Polylla executable
+std::string get_triangle_path() {
+    try {
+        std::filesystem::path exe_path = std::filesystem::read_symlink("/proc/self/exe");
+        std::filesystem::path exe_dir = exe_path.parent_path();
+        std::filesystem::path triangle_path = exe_dir / "bin" / "triangle";
+        return triangle_path.string();
+    } catch (...) {
+        // Fallback to current directory if symlink reading fails
+        return "./bin/triangle";
+    }
+}
+
 // Helper function for POLY file processing
 void process_poly_file(const ProgramOptions& options) {
     // Determine triangle arguments based on region flag
@@ -509,8 +524,8 @@ void process_poly_file(const ProgramOptions& options) {
         base = base.substr(0, base.length() - 5);
     }
     
-    // Construct triangle command (Unix)
-    std::string triangle_path = "./bin/triangle";
+    // Get triangle path relative to Polylla executable
+    std::string triangle_path = get_triangle_path();
     std::string triangle_cmd = triangle_path + " -" + triangle_args + " " + options.poly_file;
     
     // Visual separation before Triangle execution
