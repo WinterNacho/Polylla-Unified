@@ -72,12 +72,6 @@ void print_usage(const char* program_name) {
     std::cout << "  -e, --ele            Use .node and .ele files as input (without .neigh)\n";
     std::cout << "  -p, --poly           Use .poly file as input (requires Triangle)\n";
     std::cout << "  -p:ARGS              Use .poly file with custom Triangle arguments\n\n";
-    
-    std::cout << "File specification:\n";
-    std::cout << "  You can specify files in two ways:\n";
-    std::cout << "  1. Individual files: program -n file.node file.ele file.neigh\n";
-    std::cout << "  2. Base name: program -n basename (automatically uses basename.node, basename.ele, basename.neigh)\n\n";
-    
     std::cout << "Triangle integration (.poly files):\n";
     std::cout << "  Basic usage:\n";
     std::cout << "    " << program_name << " -p input.poly                    # Uses 'triangle -pnz'\n";
@@ -449,8 +443,22 @@ void execute_mesh_operations(MeshType& mesh, const ProgramOptions& options) {
 
 // Helper function for OFF file processing
 void process_off_file(const ProgramOptions& options) {
+    // Warning for OFF + region combination
+    if (options.polylla_options.use_regions) {
+        std::cout << "WARNING: Region processing requested with OFF file input" << std::endl;
+        std::cout << "    OFF files do not contain region information - region processing will be ignored" << std::endl;
+        std::cout << "    Use .node/.ele/.neigh files or .poly files for region support" << std::endl;
+    }
+
 #ifdef CUDA_AVAILABLE
     if (options.use_gpu) {
+        // Warning for GPU + smoothing combination
+        if (!options.polylla_options.smooth_method.empty()) {
+            std::cout << "WARNING: Smoothing requested with GPU acceleration" << std::endl;
+            std::cout << "    GPU implementation does not support smoothing - smoothing will be ignored" << std::endl;
+            std::cout << "    Use CPU version (remove --gpu flag) for smoothing support" << std::endl;
+        }
+        
         // Use GPU version (temporarily with bool parameter, will be updated in Phase 3)
         GPolylla mesh(options.off_file, options.polylla_options.use_regions);
         execute_mesh_operations(mesh, options);
@@ -468,6 +476,13 @@ void process_off_file(const ProgramOptions& options) {
 void process_neigh_files(const ProgramOptions& options) {
 #ifdef CUDA_AVAILABLE
     if (options.use_gpu) {
+        // Warning for GPU + smoothing combination
+        if (!options.polylla_options.smooth_method.empty()) {
+            std::cout << "WARNING: Smoothing requested with GPU acceleration" << std::endl;
+            std::cout << "    GPU implementation does not support smoothing - smoothing will be ignored" << std::endl;
+            std::cout << "    Use CPU version (remove --gpu flag) for smoothing support" << std::endl;
+        }
+        
         // Use GPU version (temporarily with bool parameter, will be updated in Phase 3)
         GPolylla mesh(options.node_file, options.ele_file, options.neigh_file, options.polylla_options.use_regions);
         execute_mesh_operations(mesh, options);

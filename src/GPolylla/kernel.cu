@@ -558,17 +558,26 @@ __device__ int count_frontier_edges_d(halfEdge *HalfEdges, bit_vector_d *frontie
 __global__ void label_extra_frontier_edge_d(halfEdge *HalfEdges, bit_vector_d *frontier_edges, vertex *vertices, half *seed_edges, int n){
     int v = threadIdx.x + blockDim.x*blockIdx.x;
     if (v < n){
-
+        // Solo procesar vértices con incident_halfedge válido
+        int incident_edge = vertices[v].incident_halfedge;
+        if (incident_edge < 0 || incident_edge >= n*3) return; // Vértice inválido o fuera de rango
+        
         if(count_frontier_edges_d(HalfEdges, frontier_edges, vertices, v) == 1){
         //if (v == 80){
             //middle edge that contains v_bet
             int middle_edge = calculate_middle_edge_d(HalfEdges, frontier_edges, vertices, v);
 
+            // Verificar que middle_edge es válido antes de usar
+            if (middle_edge < 0) return;
+            
             //middle edge that contains v_bet
             int t1 = middle_edge;
             //int t1 = v;
             //int t2 = twin_d(HalfEdges, t1);
             int t2 = twin_d(HalfEdges, middle_edge);
+
+            // Verificar que t2 es válido
+            if (t2 < 0) return;
 
             //edges of middle-edge are labeled as frontier-edge
             frontier_edges[t1] = 1;
