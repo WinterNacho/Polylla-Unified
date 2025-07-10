@@ -346,12 +346,16 @@ public:
     void print_ALE(std::string filename){
         std::ofstream out(filename);
         _polygon poly;
+        
+        // Use mesh_output coordinates when smoothing is enabled, mesh_input otherwise
+        Triangulation* coord_mesh = (!options.smooth_method.empty()) ? mesh_output : mesh_input;
+        
         out<<"# domain type\nCustom\n";
         out<<"# nodal coordinates: number of nodes followed by the coordinates \n";
-        out<<mesh_input->vertices()<<std::endl;
+        out<<coord_mesh->vertices()<<std::endl;
         //print nodes
-        for(std::size_t v = 0; v < mesh_input->vertices(); v++)
-            out<<std::setprecision(15)<<mesh_input->get_PointX(v)<<" "<<mesh_input->get_PointY(v)<<std::endl; 
+        for(std::size_t v = 0; v < coord_mesh->vertices(); v++)
+            out<<std::setprecision(15)<<coord_mesh->get_PointX(v)<<" "<<coord_mesh->get_PointY(v)<<std::endl; 
         out<<"# element connectivity: number of elements followed by the elements\n";
         out<<this->m_polygons<<std::endl;
         //print polygons
@@ -417,13 +421,16 @@ public:
     //Print off file of the polylla mesh
     void print_OFF(std::string filename) {
         std::ofstream out(filename);
+        
+        // Use mesh_output coordinates when smoothing is enabled, mesh_input otherwise
+        Triangulation* coord_mesh = (!options.smooth_method.empty()) ? mesh_output : mesh_input;
 
         out << "OFF" << std::endl;
-        out << std::setprecision(15) << mesh_input->vertices() << " " << m_polygons << " " << n_frontier_edges / 2 << std::endl;
+        out << std::setprecision(15) << coord_mesh->vertices() << " " << m_polygons << " " << n_frontier_edges / 2 << std::endl;
 
         // Print vertices
-        for (int i = 0; i < mesh_input->vertices(); i++) {
-            out << mesh_input->get_PointX(i) << " " << mesh_input->get_PointY(i) << " 0" << std::endl;
+        for (int i = 0; i < coord_mesh->vertices(); i++) {
+            out << coord_mesh->get_PointX(i) << " " << coord_mesh->get_PointY(i) << " 0" << std::endl;
         }
 
         // Print polygons
@@ -501,19 +508,20 @@ private:
     //output: position of edge e in max_edges[e] is labeled as true
     int label_max_edge(const int e)
     {
-        //Calculates the size of each edge of a triangle 
+        //Calculates the size of each edge of a triangle
+        int e_next = mesh_input->next(e);
+        int e_prev = mesh_input->prev(e);
         double dist0 = mesh_input->distance(e);
-        double dist1 = mesh_input->distance(mesh_input->next(e));
-        double dist2 = mesh_input->distance(mesh_input->prev(e));
+        double dist1 = mesh_input->distance(e_next);
+        double dist2 = mesh_input->distance(e_prev);
+        
         //Find the longest edge of the triangle
         if(std::max({dist0, dist1, dist2}) == dist0)
             return e;
         else if(std::max({dist0, dist1, dist2}) == dist1)
-            return mesh_input->next(e);
+            return e_next;
         else
-            return mesh_input->prev(e);
-        return -1;
-
+            return e_prev;
     }
 
  
