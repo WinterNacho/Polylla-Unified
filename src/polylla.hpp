@@ -149,6 +149,11 @@ public:
         //triangles = mesh_input->get_Triangles(); //Change by triangle list
         seed_bet_mark = bit_vector(this->mesh_input->halfEdges(), false);
 
+        // Pre-compute region boundary edges if using regions
+        if (options.use_regions) {
+            compute_region_boundary_edges();
+        }
+
         //terminal_edges = bit_vector(mesh_input->halfEdges(), false);
         //seed_edges = bit_vector(mesh_input->halfEdges(), false);
         
@@ -176,6 +181,12 @@ public:
             t_smooth = std::chrono::duration<double, std::milli>(t_end-t_start).count();
             std::string region_info = options.use_regions ? " (preserving region boundaries)" : "";     
             std::cout<<"Optimized mesh in "<<t_smooth<<" ms using "<<options.smooth_method<<" method"<<region_info<<std::endl;
+            
+            // After smoothing, copy smoothed coordinates to mesh_input
+            for (std::size_t v = 0; v < mesh_output->vertices(); v++) {
+                mesh_input->set_PointX(v, mesh_output->get_PointX(v));
+                mesh_input->set_PointY(v, mesh_output->get_PointY(v));
+            }
         }
         //Label max edges of each triangle
         auto t_start = std::chrono::high_resolution_clock::now();
@@ -482,14 +493,7 @@ private:
         bool is_terminal_edge = (mesh_input->is_interior_face(twin) && (max_edges[e] && max_edges[twin]));
         bool is_terminal_border_edge = (mesh_input->is_border_face(twin) && max_edges[e]);
         
-        bool is_terminal_region_edge = false;
-        if (options.use_regions) {
-            bool is_region_boundary = false;
-            int region1 = mesh_input->region_face(mesh_input->index_face(e));
-            int region2 = mesh_input->region_face(mesh_input->index_face(twin));
-            is_region_boundary = (region1 != region2);
-            is_terminal_region_edge = (is_region_boundary && max_edges[e]);
-        }
+        bool is_terminal_region_edge = options.use_regions && region_boundary_edges[e] && max_edges[e];
 
         if((is_terminal_edge && e < twin) || is_terminal_border_edge || is_terminal_region_edge){
             return true;
@@ -513,6 +517,8 @@ private:
     int label_max_edge(const int e)
     {
         //Calculates the size of each edge of a triangle
+        if (mesh_input == nullptr) return e;
+        
         int e_next = mesh_input->next(e);
         int e_prev = mesh_input->prev(e);
         double dist0 = mesh_input->distance(e);
@@ -537,12 +543,7 @@ private:
         bool is_border_edge = mesh_input->is_border_face(e) || mesh_input->is_border_face(twin);
         bool is_not_max_edge = !(max_edges[e] || max_edges[twin]);
 
-        bool is_region_boundary = false;
-        if (options.use_regions) {
-            int region1 = mesh_input->region_face(mesh_input->index_face(e));
-            int region2 = mesh_input->region_face(mesh_input->index_face(twin));
-            is_region_boundary = (region1 != region2);
-        }
+        bool is_region_boundary = options.use_regions && region_boundary_edges[e];
         
         return is_border_edge || is_not_max_edge || is_region_boundary;
 
@@ -839,57 +840,39 @@ private:
     bool is_region_boundary_vertex(int v) {
         if (!options.use_regions) return false;
         
-        auto e_init = mesh_output->edge_of_vertex(v);
+        auto e_init = mesh_input->edge_of_vertex(v);
         if (e_init < 0) return false;
         
         // Border vertices are always region boundaries
-        if (mesh_output->is_border_vertex(v)) return true;
+        if (mesh_input->is_border_vertex(v)) return true;
         
-        // Use pre-computed edge information if available
-        if (!region_boundary_edges.empty()) {
-            auto e_next = e_init;
-            do {
-                if (region_boundary_edges[e_next]) return true;
-                e_next = mesh_output->CCW_edge_to_vertex(e_next);
-            } while (e_next != e_init);
-            return false;
-        }
-        
-        // Fallback to original method if pre-computation not done
+        // Use pre-computed edge information
         auto e_next = e_init;
         do {
-            auto twin = mesh_output->twin(e_next);
-            if (twin >= 0) {
-                auto face1 = mesh_output->index_face(e_next);
-                auto face2 = mesh_output->index_face(twin);
-
-                if (face1 >= 0 && face2 >= 0) {
-                    if (mesh_output->region_face(face1) != mesh_output->region_face(face2)) {
-                        return true;
-                    }
-                }
-            }
-            e_next = mesh_output->CCW_edge_to_vertex(e_next);
+            if (region_boundary_edges[e_next]) return true;
+            e_next = mesh_input->CCW_edge_to_vertex(e_next);
         } while (e_next != e_init);
         
         return false;
     }
 
-    // Pre-compute region boundary vertices for optimization during smoothing
-    // Pre-compute region boundary edges for smoothing optimization
+    // Pre-compute region boundary edges for optimization during smoothing
     void compute_region_boundary_edges() {
         if (!options.use_regions) return;
         
-        region_boundary_edges.resize(mesh_output->halfEdges(), false);
+        region_boundary_edges.resize(mesh_input->halfEdges(), false);
         
-        for (int e = 0; e < mesh_output->halfEdges(); e++) {
-            int twin = mesh_output->twin(e);
+        for (int e = 0; e < mesh_input->halfEdges(); e++) {
+            // Skip if already processed (twin was processed first)
+            if (region_boundary_edges[e]) continue;
+            
+            int twin = mesh_input->twin(e);
             if (twin >= 0) {
-                int face1 = mesh_output->index_face(e);
-                int face2 = mesh_output->index_face(twin);
+                int face1 = mesh_input->index_face(e);
+                int face2 = mesh_input->index_face(twin);
                 
                 if (face1 >= 0 && face2 >= 0) {
-                    if (mesh_output->region_face(face1) != mesh_output->region_face(face2)) {
+                    if (mesh_input->region_face(face1) != mesh_input->region_face(face2)) {
                         region_boundary_edges[e] = true;
                         region_boundary_edges[twin] = true;
                     }
@@ -899,29 +882,29 @@ private:
     }
 
     bool is_valid_move(int v) {
-        auto e_init = mesh_output->edge_of_vertex(v);
+        auto e_init = mesh_input->edge_of_vertex(v);
         auto e_next = e_init;
         do {
             auto first_edge = e_next;
-            auto last_edge = mesh_output->prev(first_edge);
+            auto last_edge = mesh_input->prev(first_edge);
             auto curr_edge = last_edge;
             do {
-                auto e_init_2 = mesh_output->next(curr_edge);
+                auto e_init_2 = mesh_input->next(curr_edge);
                 auto e_next_2 = e_init_2;
                 do {
                     // std::cout <<"e1:" << e_next_1 << ", e2:" << e_next_2<<std::endl;
-                    auto v0 = mesh_output->origin(curr_edge);
-                    auto v1 = mesh_output->target(curr_edge);
-                    auto v2 = mesh_output->origin(e_next_2);
-                    auto v3 = mesh_output->target(e_next_2);
-                    auto v0_x = mesh_output->get_PointX(v0);
-                    auto v0_y = mesh_output->get_PointY(v0);
-                    auto v1_x = mesh_output->get_PointX(v1);
-                    auto v1_y = mesh_output->get_PointY(v1);
-                    auto v2_x = mesh_output->get_PointX(v2);
-                    auto v2_y = mesh_output->get_PointY(v2);
-                    auto v3_x = mesh_output->get_PointX(v3);
-                    auto v3_y = mesh_output->get_PointY(v3);
+                    auto v0 = mesh_input->origin(curr_edge);
+                    auto v1 = mesh_input->target(curr_edge);
+                    auto v2 = mesh_input->origin(e_next_2);
+                    auto v3 = mesh_input->target(e_next_2);
+                    auto v0_x = mesh_input->get_PointX(v0);
+                    auto v0_y = mesh_input->get_PointY(v0);
+                    auto v1_x = mesh_input->get_PointX(v1);
+                    auto v1_y = mesh_input->get_PointY(v1);
+                    auto v2_x = mesh_input->get_PointX(v2);
+                    auto v2_y = mesh_input->get_PointY(v2);
+                    auto v3_x = mesh_input->get_PointX(v3);
+                    auto v3_y = mesh_input->get_PointY(v3);
                     // if (v0 == 166 && v1 == 183 && v2 ==182 && v3 == 165) {
                     //     std::cout << "HERE" << std::endl;
                     // }
@@ -951,20 +934,17 @@ private:
                                 return false;
                             }
                     }
-                    e_next_2 = mesh_output->next(e_next_2);
+                    e_next_2 = mesh_input->next(e_next_2);
                 } while (e_init_2 != e_next_2);
-                curr_edge = mesh_output->next(curr_edge);
-            } while (curr_edge != mesh_output->next(first_edge));
-        e_next = mesh_output->CCW_edge_to_vertex(e_next);
+                curr_edge = mesh_input->next(curr_edge);
+            } while (curr_edge != mesh_input->next(first_edge));
+        e_next = mesh_input->CCW_edge_to_vertex(e_next);
         } while (e_init != e_next);
         return true;
     }
 
     void optimize_mesh_laplacian(int max_iterations) {
         double first_movement = -1;
-        
-        // Pre-compute region boundary edges for optimized smoothing
-        compute_region_boundary_edges();
         
         for (int i = 0; i < max_iterations; i++) {
             n_smooth_iterations++;
@@ -1016,9 +996,6 @@ private:
             std::cerr << "Warning: Unknown measure type '" << measure_type << "'. Skipping optimization." << std::endl;
             return;
         }
-        
-        // Pre-compute region boundary edges for optimized smoothing
-        compute_region_boundary_edges();
         
         for (int i = 0; i<iterations; i++) {
             n_smooth_iterations++;
@@ -1095,9 +1072,6 @@ private:
             }
             target_length = sum/mesh_output->halfEdges();
         }
-        
-        // Pre-compute region boundary edges for optimized smoothing
-        compute_region_boundary_edges();
         
         // std::cout << target_length << std::endl;
         for (int i = 0; i < max_iterations; i++) {
