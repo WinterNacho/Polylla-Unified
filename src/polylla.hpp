@@ -57,6 +57,9 @@ private:
     // Configuration options
     PolyllaOptions options;
 
+    // Pre-computed region boundary edges for smoothing optimization
+    std::vector<bool> region_boundary_edges;
+
     //Statistics
     int m_polygons = 0; //Number of polygons
     int n_frontier_edges = 0; //Number of frontier edges
@@ -125,6 +128,7 @@ public:
         seed_edges.clear(); 
         seed_bet_mark.clear();
         triangle_list.clear();
+        region_boundary_edges.clear();
         delete mesh_input;
         delete mesh_output;
     }
@@ -832,9 +836,6 @@ private:
     }
 
     // Check if a vertex is on a region boundary (should not be moved during smoothing)
-    // A vertex is on region boundary if any adjacent edge connects faces with different region IDs
-    // or if vertex is on external mesh boundary
-    // Returns false if regions are disabled or vertex has no valid incident edge
     bool is_region_boundary_vertex(int v) {
         if (!options.use_regions) return false;
         
@@ -844,6 +845,17 @@ private:
         // Border vertices are always region boundaries
         if (mesh_output->is_border_vertex(v)) return true;
         
+        // Use pre-computed edge information if available
+        if (!region_boundary_edges.empty()) {
+            auto e_next = e_init;
+            do {
+                if (region_boundary_edges[e_next]) return true;
+                e_next = mesh_output->CCW_edge_to_vertex(e_next);
+            } while (e_next != e_init);
+            return false;
+        }
+        
+        // Fallback to original method if pre-computation not done
         auto e_next = e_init;
         do {
             auto twin = mesh_output->twin(e_next);
@@ -851,10 +863,9 @@ private:
                 auto face1 = mesh_output->index_face(e_next);
                 auto face2 = mesh_output->index_face(twin);
 
-                // Check if faces have different regions
                 if (face1 >= 0 && face2 >= 0) {
                     if (mesh_output->region_face(face1) != mesh_output->region_face(face2)) {
-                        return true; // Different regions - early exit
+                        return true;
                     }
                 }
             }
@@ -865,13 +876,25 @@ private:
     }
 
     // Pre-compute region boundary vertices for optimization during smoothing
-    // Only call this when use_regions is true and before starting smoothing iterations
-    void compute_region_boundary_cache(std::vector<bool>& cache) {
+    // Pre-compute region boundary edges for smoothing optimization
+    void compute_region_boundary_edges() {
         if (!options.use_regions) return;
         
-        cache.resize(mesh_output->vertices(), false);
-        for(std::size_t v = 0; v < mesh_output->vertices(); v++) {
-            cache[v] = is_region_boundary_vertex(v);
+        region_boundary_edges.resize(mesh_output->halfEdges(), false);
+        
+        for (int e = 0; e < mesh_output->halfEdges(); e++) {
+            int twin = mesh_output->twin(e);
+            if (twin >= 0) {
+                int face1 = mesh_output->index_face(e);
+                int face2 = mesh_output->index_face(twin);
+                
+                if (face1 >= 0 && face2 >= 0) {
+                    if (mesh_output->region_face(face1) != mesh_output->region_face(face2)) {
+                        region_boundary_edges[e] = true;
+                        region_boundary_edges[twin] = true;
+                    }
+                }
+            }
         }
     }
 
@@ -940,9 +963,8 @@ private:
     void optimize_mesh_laplacian(int max_iterations) {
         double first_movement = -1;
         
-        // Pre-compute region boundary vertices for optimization
-        std::vector<bool> region_boundary_cache;
-        compute_region_boundary_cache(region_boundary_cache);
+        // Pre-compute region boundary edges for optimized smoothing
+        compute_region_boundary_edges();
         
         for (int i = 0; i < max_iterations; i++) {
             n_smooth_iterations++;
@@ -952,7 +974,7 @@ private:
                 if (mesh_output->is_border_vertex(v) || mesh_output->edge_of_vertex(v) < 0) continue;   
 
                 // If using regions, skip vertices on region boundaries to preserve topology
-                if (options.use_regions && region_boundary_cache[v]) continue;
+                if (options.use_regions && is_region_boundary_vertex(v)) continue;
                 auto e_init = mesh_output->edge_of_vertex(v);
                 // std::cout << "v"<<v <<std::endl;
                 // std::cout << e_init <<std::endl;
@@ -995,9 +1017,8 @@ private:
             return;
         }
         
-        // Pre-compute region boundary vertices for optimization
-        std::vector<bool> region_boundary_cache;
-        compute_region_boundary_cache(region_boundary_cache);
+        // Pre-compute region boundary edges for optimized smoothing
+        compute_region_boundary_edges();
         
         for (int i = 0; i<iterations; i++) {
             n_smooth_iterations++;
@@ -1005,7 +1026,7 @@ private:
                 if (mesh_output->is_border_vertex(v) || mesh_output->edge_of_vertex(v) < 0) continue;   
 
                 // If using regions, skip vertices on region boundaries to preserve topology
-                if (options.use_regions && region_boundary_cache[v]) continue;
+                if (options.use_regions && is_region_boundary_vertex(v)) continue;
                 auto e_init = mesh_output->edge_of_vertex(v);
                 auto e_next = e_init;
                 int n = 0;
@@ -1075,9 +1096,8 @@ private:
             target_length = sum/mesh_output->halfEdges();
         }
         
-        // Pre-compute region boundary vertices for optimization
-        std::vector<bool> region_boundary_cache;
-        compute_region_boundary_cache(region_boundary_cache);
+        // Pre-compute region boundary edges for optimized smoothing
+        compute_region_boundary_edges();
         
         // std::cout << target_length << std::endl;
         for (int i = 0; i < max_iterations; i++) {
@@ -1088,7 +1108,7 @@ private:
                 if (mesh_output->is_border_vertex(v) || mesh_output->edge_of_vertex(v) < 0) continue;
 
                 // If using regions, skip vertices on region boundaries to preserve topology   
-                if (options.use_regions && region_boundary_cache[v]) continue;
+                if (options.use_regions && is_region_boundary_vertex(v)) continue;
                 auto e_init = mesh_output->edge_of_vertex(v);
                 auto e_next = e_init;
                 double origin_x = mesh_output->get_PointX(v);
