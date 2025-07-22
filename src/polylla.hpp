@@ -837,21 +837,50 @@ private:
     }
 
     // Check if a vertex is on a region boundary (should not be moved during smoothing)
+    // This function is essential for preserving regional integrity during optimization algorithms
+    // 
+    // Implementation uses an optimized approach that leverages precomputed boundary edges:
+    // 1. Initial verification: If not using regions, returns false immediately
+    // 2. Border vertices: Vertices on domain border are automatically considered region boundaries  
+    // 3. Use precomputation: If precomputed boundary edge info is available, traverses incident edges in CCW order
+    // 4. Fallback: If no precomputation available, performs complete verification by comparing adjacent triangle regions
+    //
+    // This approach guarantees O(1) efficiency in average case when using precomputation,
+    // while maintaining robustness through the fallback method.
     bool is_region_boundary_vertex(int v) {
+        // 1. Initial verification: if not using regions, return false immediately
         if (!options.use_regions) return false;
         
         auto e_init = mesh_input->edge_of_vertex(v);
         if (e_init < 0) return false;
         
-        // Border vertices are always region boundaries
+        // 2. Border vertices: vertices on domain border are automatically considered region boundaries
         if (mesh_input->is_border_vertex(v)) return true;
         
-        // Use pre-computed edge information
-        auto e_next = e_init;
-        do {
-            if (region_boundary_edges[e_next]) return true;
-            e_next = mesh_input->CCW_edge_to_vertex(e_next);
-        } while (e_next != e_init);
+        // 3. Use precomputed information: if available, traverse incident edges in CCW order
+        if (!region_boundary_edges.empty()) {
+            auto e_next = e_init;
+            do {
+                if (region_boundary_edges[e_next]) return true;
+                e_next = mesh_input->CCW_edge_to_vertex(e_next);
+            } while (e_next != e_init);
+        } else {
+            // 4. Fallback: perform complete verification by comparing adjacent triangle regions
+            auto e_next = e_init;
+            int first_region = -1;
+            do {
+                int face = mesh_input->index_face(e_next);
+                if (face >= 0) {
+                    int current_region = mesh_input->region_face(face);
+                    if (first_region == -1) {
+                        first_region = current_region;
+                    } else if (current_region != first_region) {
+                        return true; // Found different regions
+                    }
+                }
+                e_next = mesh_input->CCW_edge_to_vertex(e_next);
+            } while (e_next != e_init);
+        }
         
         return false;
     }
@@ -879,6 +908,22 @@ private:
                 }
             }
         }
+    }
+
+    // Pre-compute region boundary vertices for additional optimization
+    // This can be useful for algorithms that need to check vertex boundaries frequently
+    std::vector<bool> compute_region_boundary_vertices() {
+        std::vector<bool> region_boundary_vertices(mesh_input->vertices(), false);
+        
+        if (!options.use_regions) return region_boundary_vertices;
+        
+        for (int v = 0; v < mesh_input->vertices(); v++) {
+            if (is_region_boundary_vertex(v)) {
+                region_boundary_vertices[v] = true;
+            }
+        }
+        
+        return region_boundary_vertices;
     }
 
     bool is_valid_move(int v) {
